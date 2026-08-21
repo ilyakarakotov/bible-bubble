@@ -55,6 +55,7 @@
       <svg class="search-icon"><use href="#i-search"/></svg>
       <input id="search-input" type="search" placeholder="Search people, notes, references…  (/)" autocomplete="off" spellcheck="false">
       <div id="search-results" class="search-results" hidden></div>
+      <button class="btn icon ghost search-close only-phone" data-act="search-close" title="Close search" aria-label="Close search"><svg><use href="#i-close"/></svg></button>
     </div>
 
     <nav class="viewtabs" role="tablist">
@@ -63,6 +64,7 @@
     </nav>
 
     <div class="actions">
+      <button class="btn icon ghost only-phone" data-act="search-open" title="Search" aria-label="Search"><svg><use href="#i-search"/></svg></button>
       <button class="btn icon ghost" data-act="undo" title="Undo (⌘Z)"><svg><use href="#i-undo"/></svg></button>
       <button class="btn icon ghost" data-act="redo" title="Redo (⇧⌘Z)"><svg><use href="#i-redo"/></svg></button>
       <span class="sep"></span>
@@ -185,6 +187,15 @@
     <aside class="inspector" id="inspector" hidden></aside>
 
   </main>
+
+  <nav class="mobilebar" id="mobilebar" aria-label="Main navigation">
+    <button class="mb-item" data-mb="lineage" aria-label="Lineage panel"><svg><use href="#i-trace"/></svg><span>Lineage</span></button>
+    <button class="mb-item is-active" data-mb="canvas" aria-label="Canvas"><svg><use href="#i-canvas"/></svg><span>Canvas</span></button>
+    <button class="mb-item" data-mb="timeline" aria-label="Timeline"><svg><use href="#i-timeline"/></svg><span>Timeline</span></button>
+    <button class="mb-item" data-mb="details" aria-label="Details panel"><svg><use href="#i-people"/></svg><span id="mb-details-label">Details</span></button>
+  </nav>
+
+  <div class="sheet-backdrop" id="sheet-backdrop" hidden></div>
 
   <div class="statusbar" id="statusbar">
     <span id="status-count"></span>

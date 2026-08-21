@@ -149,6 +149,20 @@ function findChrome() {
     await page.waitForTimeout(800);
     if (await page.locator('.tl-bar').count() < 40) throw new Error('too few bars');
   });
+  await step('lifespan bars are actually painted', async () => {
+    // A custom property set through a style object is silently dropped, which
+    // once left every bar transparent while still laying out correctly.
+    const bar = await page.evaluate(() => {
+      const b = document.querySelector('.tl-bar');
+      if (!b) return null;
+      const cs = getComputedStyle(b);
+      return { bg: cs.backgroundColor, w: Math.round(b.getBoundingClientRect().width) };
+    });
+    if (!bar) throw new Error('no bars');
+    if (/rgba\(0, 0, 0, 0\)|transparent/.test(bar.bg)) throw new Error('bars are invisible: ' + bar.bg);
+    if (bar.w < 2) throw new Error('bar width ' + bar.w);
+  });
+
   await step('scrubber reports who was alive', async () => {
     await page.check('#tl-scrub');
     await page.waitForTimeout(500);

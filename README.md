@@ -72,10 +72,28 @@ died in the very year of the Flood.
 
 ![The timeline with the year scrubber](docs/timeline.png)
 
+### On a phone
+The whole thing works one-handed. A bottom bar carries the four places you go —
+**Lineage**, **Canvas**, **Timeline**, and **Details** (which shows the selected
+person's name, so you always know what you have got hold of).
+
+Tap a bubble to select it; its link handles grow to finger size. Press and hold
+for the same menu a right-click gives on a desktop. Pinch to zoom, drag to pan,
+double-tap empty canvas to add someone. Details opens as a sheet over the
+canvas — flick it down to dismiss — so the bubble you are editing stays in view.
+
+<p align="center">
+  <img src="docs/mobile-canvas.png" alt="The canvas on a phone" width="30%">
+  <img src="docs/mobile-details.png" alt="The details sheet" width="30%">
+  <img src="docs/mobile-timeline.png" alt="The timeline on a phone" width="30%">
+</p>
+
 ### Everything else
 Multiple boards, full undo/redo, search across names, notes and references, a
 lineage outline in the sidebar, a tidy auto-layout that arranges the whole board
 into generations, light and dark themes, and export to JSON, Markdown or CSV.
+The layout adapts from a phone up to a wide desktop, and every control is sized
+for a finger on touch devices.
 
 ![Dark theme](docs/dark.png)
 

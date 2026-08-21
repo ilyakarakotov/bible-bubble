@@ -99,6 +99,7 @@ body {
   overscroll-behavior: none;
 }
 button, input, select, textarea { font: inherit; color: inherit; }
+button { -webkit-tap-highlight-color: transparent; }
 h1,h2,h3,h4 { margin: 0; font-weight: 600; }
 p { margin: 0; }
 .sprite { position: absolute; width: 0; height: 0; }
@@ -411,7 +412,11 @@ mark { background: var(--accent-soft); color: var(--accent-ink); border-radius: 
   display: grid; place-items: center; cursor: crosshair;
   opacity: 0; transform: scale(.6); transition: opacity .13s, transform .13s, background .13s;
   z-index: 3; font-size: 12px; line-height: 1; font-weight: 700; padding-bottom: 1px;
+  pointer-events: none;                 /* opacity:0 alone still takes the tap */
 }
+.bubble:hover .b-handle,
+.bubble.is-sel .b-handle,
+.b-handle.is-live { pointer-events: auto; }
 .bubble:hover .b-handle, .bubble.is-sel .b-handle, .b-handle.is-live { opacity: 1; transform: scale(1); }
 .b-handle:hover { background: var(--b-accent, var(--accent)); color: #fff; transform: scale(1.2); }
 :root[data-theme="dark"] .b-handle:hover { color: #16130c; }
@@ -695,17 +700,238 @@ kbd {
 @keyframes rise { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: none; } }
 
 /* ---------- responsive ---------- */
-@media (max-width: 1100px) { .inspector { width: 288px; } .sidebar { width: 236px; } }
-@media (max-width: 860px) {
-  .sidebar { position: absolute; left: 0; top: 0; bottom: 0; box-shadow: var(--shadow-lg); }
-  .brand-name, .viewtabs .tab span { display: none; }
-  .inspector { position: absolute; right: 0; top: 0; bottom: 0; width: min(330px, 88vw); box-shadow: var(--shadow-lg); }
-  .canvas-hud { bottom: 8px; left: 8px; }
+
+/* Elements that exist only in the phone layout. */
+.only-phone { display: none !important; }
+.mobilebar { display: none; }
+.sheet-backdrop { display: none; }
+
+@media (max-width: 1100px) { .inspector { width: 292px; } .sidebar { width: 244px; } }
+
+/* Tablet: panels float over the canvas instead of squeezing it, and the
+   toolbar sheds what the ☰ menu already offers. */
+@media (max-width: 1000px) {
+  .sidebar {
+    position: absolute; left: 0; top: 0; bottom: 0; z-index: 30;
+    box-shadow: var(--shadow-lg);
+  }
+  .inspector {
+    position: absolute; right: 0; top: 0; bottom: 0; z-index: 30;
+    width: min(330px, 84vw); box-shadow: var(--shadow-lg);
+  }
+  .brand-name { display: none; }
+  .actions [data-act="undo"],
+  .actions [data-act="redo"],
+  .actions [data-act="theme"],
+  .actions .sep { display: none; }
+  .search-wrap { max-width: 260px; }
 }
-@media (max-width: 560px) {
-  .board-picker select { max-width: 100px; }
+
+/* ---------- touch ---------- */
+@media (pointer: coarse) {
+  /* Hover cannot reveal anything on a touch screen, so the link handles ride on
+     selection instead — and they need a finger-sized target. */
+  .bubble:hover .b-handle { opacity: 0; transform: scale(.6); }
+  .bubble.is-sel .b-handle, .b-handle.is-live { opacity: 1; transform: scale(1); }
+  /* These sit inside the zoomed world, so they shrink with it — start large
+     enough that they are still a fair target at the zooms people actually use. */
+  .b-handle { width: 30px; height: 30px; font-size: 15px; border-width: 2px; }
+  /* The hit area grows away from the bubble, never back across its face, or a
+     tap near the edge would start a link instead of selecting. */
+  .b-handle::after { content: ""; position: absolute; border-radius: 50%; }
+  .b-handle.h-bottom { bottom: -24px; margin-left: -15px; }
+  .b-handle.h-bottom::after { inset: -2px -12px -12px -12px; }
+  .b-handle.h-top    { top: -24px; margin-left: -15px; }
+  .b-handle.h-top::after { inset: -12px -12px -2px -12px; }
+  .b-handle.h-right  { right: -24px; margin-top: -15px; }
+  .b-handle.h-right::after { inset: -12px -12px -12px -2px; }
+  .b-handle.h-left   { left: -24px; margin-top: -15px; }
+  .b-handle.h-left::after { inset: -12px -2px -12px -12px; }
+  .bubble { -webkit-touch-callout: none; }
+  .rel-item .btn { opacity: 1; }          /* no hover to reveal the unlink button */
+  .btn { min-height: 34px; }
+  .btn.sm { min-height: 30px; }
+  .menu-item { padding: 10px 11px; }
+  .sr-item { padding: 10px 9px; }
+  .picker-item { padding: 10px 9px; }
+  .tree-row { padding: 7px 6px; }
+  .side-tab { height: 34px; padding: 0 11px; }
+  .zoomctl .btn.sm { min-height: 32px; min-width: 32px; }
+  .rel-item { padding: 8px 5px 8px 7px; }
+  .insp-swatch { width: 24px; height: 24px; }
+  .hl-item .btn { min-height: 30px; }
+
+  /* Safari zooms the whole page when a focused field is under 16px. Applies to
+     tablets as much as phones, so it hangs off the pointer type, not the width. */
+  input[type="text"], input[type="search"], input[type="number"], textarea, select,
+  .board-picker select, #search-input, .side-filter input, .side-filter select,
+  .tl-field select, .hl-item textarea, .tagbox input { font-size: 16px; }
+  .side-filter input, .side-filter select { height: 34px; }
+  .board-picker select { height: 34px; background-position: calc(100% - 12px) 15px, calc(100% - 7px) 15px; }
+  .tl-field select { height: 32px; }
+  #search-input { height: 36px; }
+}
+
+/* ---------- phone ---------- */
+@media (max-width: 700px) {
+  :root { --topbar-h: 54px; --mobilebar-h: 58px; }
+
+  html, body { overscroll-behavior: none; }
+  #app { grid-template-rows: var(--topbar-h) 1fr auto; }
+
+  .only-phone { display: inline-flex !important; }
+  .statusbar { display: none; }
+
+  /* --- top bar: brand, board, search, add, menu --- */
+  .topbar {
+    gap: 6px; padding: 0 8px;
+    padding-left: max(8px, env(safe-area-inset-left));
+    padding-right: max(8px, env(safe-area-inset-right));
+    position: relative;
+  }
+  .brand-name { display: none; }
+  .brand { flex: none; }
+  .viewtabs { display: none; }              /* lives in the bottom bar */
+  .board-picker { flex: 1; min-width: 0; }
+  .board-picker select {
+    width: 100%; max-width: none; height: 38px; font-size: 16px;
+    background-position: calc(100% - 12px) 17px, calc(100% - 7px) 17px;
+  }
+  .board-picker .btn.icon { display: none; }  /* board actions live in ☰ */
+  .actions { gap: 2px; }
+  .actions .sep,
+  .actions [data-act="undo"],
+  .actions [data-act="redo"],
+  .actions [data-act="layout"],
+  .actions [data-act="fit"],
+  .actions [data-act="theme"] { display: none; }
+  .actions .btn { width: 38px; height: 38px; }
+  .actions .btn.primary { width: 38px; padding: 0; justify-content: center; }
   .actions .btn.primary span { display: none; }
-  .actions .btn.primary { width: 32px; padding: 0; justify-content: center; }
+  .actions .btn svg { width: 18px; height: 18px; }
+
+  /* search expands over the whole bar when opened */
+  .search-wrap { display: none; }
+  #app.search-open .search-wrap {
+    display: flex; align-items: center; gap: 4px;
+    position: absolute; inset: 0; z-index: 5;
+    background: var(--panel); padding: 0 8px; max-width: none;
+  }
+  #app.search-open #search-input { height: 40px; font-size: 16px; }
+  #app.search-open .search-icon { top: 20px; }
+  .search-close { width: 38px; height: 38px; flex: none; }
+  .search-results { left: 8px; right: 8px; }
+
+  /* --- panels become sheets, closed until asked for --- */
+  .sidebar {
+    position: absolute; left: 0; top: 0; bottom: 0; z-index: 60;
+    width: min(320px, 86vw);
+    transform: translateX(-102%);
+    transition: transform .22s cubic-bezier(.2,.9,.3,1);
+    padding-left: env(safe-area-inset-left);
+    box-shadow: var(--shadow-lg);
+  }
+  #app.panel-lineage .sidebar { transform: none; }
+  #app.sidebar-hidden .sidebar { display: flex; }   /* the desktop toggle is not in charge here */
+  .sidebar-reveal { display: none !important; }
+
+  /* details slides up from the bottom, so the canvas stays in view above it */
+  .inspector {
+    /* Sits directly on top of the bottom bar rather than behind it. */
+    position: fixed; left: 0; right: 0; top: auto;
+    bottom: calc(var(--mobilebar-h) + env(safe-area-inset-bottom));
+    width: 100%; height: min(70vh, 580px);
+    border-left: 0; border-top: 1px solid var(--line);
+    border-radius: 18px 18px 0 0;
+    z-index: 60;
+    transform: translateY(calc(100% + var(--mobilebar-h) + env(safe-area-inset-bottom)));
+    transition: transform .24s cubic-bezier(.2,.9,.3,1);
+    box-shadow: var(--shadow-lg);
+  }
+  #app.panel-details .inspector { transform: none; }
+  .inspector::before {
+    content: ""; position: sticky; top: 0; display: block;
+    width: 38px; height: 4px; margin: 8px auto 2px;
+    border-radius: 999px; background: var(--line); flex: none;
+  }
+  .insp-head { top: 0; }
+
+  .sheet-backdrop {
+    display: block; position: fixed; inset: 0; z-index: 50;
+    background: color-mix(in srgb, #000 34%, transparent);
+    animation: fadein .18s ease;
+  }
+  @keyframes fadein { from { opacity: 0; } to { opacity: 1; } }
+
+  /* --- bottom navigation --- */
+  .mobilebar {
+    display: flex; align-items: stretch;
+    background: var(--panel); border-top: 1px solid var(--line);
+    padding-bottom: env(safe-area-inset-bottom);
+    z-index: 70; position: relative;
+  }
+  .mb-item {
+    flex: 1; min-width: 0; display: flex; flex-direction: column;
+    align-items: center; justify-content: center; gap: 2px;
+    height: var(--mobilebar-h); padding: 0 4px;
+    border: 0; background: transparent; color: var(--ink-3);
+    cursor: pointer; font-size: 10.5px; font-weight: 500;
+  }
+  .mb-item svg {
+    width: 21px; height: 21px; fill: none; stroke: currentColor;
+    stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round;
+  }
+  .mb-item span {
+    max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
+  .mb-item.is-active { color: var(--accent-ink); }
+  .mb-item.is-active svg { stroke-width: 2; }
+  .mb-item:active { background: var(--panel-2); }
+
+  /* --- canvas chrome --- */
+  .canvas-hud { left: 8px; bottom: 8px; }
+  .zoomctl [data-act="zoom-in"], .zoomctl [data-act="zoom-out"] { display: none; }
+  .minimap { display: none; }
+  .trace-bar { top: 8px; left: 8px; right: 8px; transform: none; justify-content: center; flex-wrap: wrap; }
+  .empty-state p { font-size: 13px; }
+
+  /* --- timeline --- */
+  .tl-toolbar { gap: 8px; padding: 7px 9px; overflow-x: auto; flex-wrap: nowrap; }
+  .tl-toolbar::-webkit-scrollbar { display: none; }
+  .tl-toolbar > * { flex: none; }
+  .tl-spacer { display: none; }
+  .tl-names { width: 108px; }
+  .tl-name-row { font-size: 11.5px; padding: 0 5px 0 7px; }
+  .tl-name-row .g { display: none; }
+  .tl-alive, .tl-undated { padding: 7px 9px; }
+  .tl-field span { display: none; }
+
+  /* --- modals sit at the bottom, thumb-first --- */
+  .modal-root { padding: 0; align-items: flex-end; }
+  .modal {
+    width: 100%; max-height: 90vh; border-radius: 18px 18px 0 0;
+    padding-bottom: env(safe-area-inset-bottom);
+  }
+  .modal-foot { flex-wrap: wrap; }
+  .modal-foot .btn { flex: 1; justify-content: center; min-height: 40px; }
+  .kbd-grid { grid-template-columns: 1fr; gap: 14px; }
+  .menu { max-width: calc(100vw - 16px); }
+  .toasts { bottom: calc(var(--mobilebar-h) + 12px + env(safe-area-inset-bottom)); }
+
+  /* --- iOS zooms the page when a focused field is under 16px --- */
+  input[type="text"], input[type="search"], input[type="number"],
+  textarea, select, .tagbox input, .insp-name-input {
+    font-size: 16px;
+  }
+  .side-filter input, .side-filter select { height: 36px; }
+  .field > label { font-size: 12px; }
+}
+
+/* Landscape phones are short: give the details sheet less height. */
+@media (max-width: 900px) and (max-height: 500px) {
+  .inspector { height: 88vh; }
+  .mb-item span { display: none; }
+  :root { --mobilebar-h: 46px; }
 }
 
 @media (prefers-reduced-motion: reduce) {

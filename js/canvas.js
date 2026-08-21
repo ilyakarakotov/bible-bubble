@@ -446,6 +446,30 @@
 
   /* ---------- pointer interaction ---------- */
   let drag = null;
+  let longPress = null;      // touch has no right-click, so hold to open the menu
+
+  function armLongPress(e) {
+    cancelLongPress();
+    if (e.pointerType !== 'touch') return;
+    const { clientX, clientY } = e;
+    const target = e.target.closest('.bubble');
+    const edge = e.target.closest('.edge');
+    longPress = setTimeout(() => {
+      longPress = null;
+      drag = null;                                   // abandon the pan/move this would have been
+      viewport.classList.remove('is-panning');
+      if (navigator.vibrate) { try { navigator.vibrate(12); } catch (_) {} }
+      emit('context', {
+        x: clientX, y: clientY,
+        id: target ? target.dataset.id : null,
+        link: edge ? edge.dataset.id : null,
+        at: toWorld(clientX, clientY),
+      });
+    }, 480);
+  }
+  function cancelLongPress() {
+    if (longPress) { clearTimeout(longPress); longPress = null; }
+  }
 
   function onPointerDown(e) {
     if (e.button === 2) return;                       // context menu handles right-click
@@ -466,6 +490,7 @@
     }
 
     if (bubble && !spaceDown && e.button === 0) {
+      armLongPress(e);
       const id = bubble.dataset.id;
       if (e.shiftKey || e.metaKey || e.ctrlKey) select([id], { add: true, toggle: true });
       else if (!selection.has(id)) select([id]);
@@ -490,6 +515,7 @@
     }
 
     // background
+    armLongPress(e);
     if (e.button === 1 || spaceDown || !(e.shiftKey)) {
       drag = { mode: 'pan', ...start, vx: view.x, vy: view.y };
       viewport.classList.add('is-panning');
@@ -505,6 +531,7 @@
     if (!drag) return;
     const dx = e.clientX - drag.sx, dy = e.clientY - drag.sy;
     if (!drag.moved && Math.hypot(dx, dy) > DRAG_SLOP) drag.moved = true;
+    if (drag.moved) cancelLongPress();
 
     if (drag.mode === 'pan') {
       setView({ x: drag.vx + dx, y: drag.vy + dy }, { transient: true });
@@ -557,6 +584,7 @@
   }
 
   function onPointerUp(e) {
+    cancelLongPress();
     if (!drag) return;
     const d = drag;
     drag = null;
@@ -622,7 +650,7 @@
       const [a, b] = Array.from(touches.values());
       const dist = Math.hypot(a.x - b.x, a.y - b.y);
       const mid = { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };
-      if (!pinch) { pinch = { dist, mid }; drag = null; viewport.classList.remove('is-panning'); }
+      if (!pinch) { pinch = { dist, mid }; drag = null; cancelLongPress(); viewport.classList.remove('is-panning'); }
       else if (phase === 'move') {
         if (pinch.dist > 0) zoomAt(dist / pinch.dist, mid.x, mid.y);
         setView({ x: view.x + (mid.x - pinch.mid.x), y: view.y + (mid.y - pinch.mid.y) }, { transient: true });
@@ -650,10 +678,30 @@
     viewport.addEventListener('pointerup', (e) => { trackTouch(e, 'up'); onPointerUp(e); });
     viewport.addEventListener('pointercancel', (e) => { trackTouch(e, 'up'); onPointerUp(e); });
     viewport.addEventListener('wheel', onWheel, { passive: false });
+    let lastTap = 0, lastTapAt = null, touchDoubleAt = 0;
     viewport.addEventListener('dblclick', (e) => {
       if (e.target.closest('.bubble') || e.target.closest('.edge')) return;
+      // Touch browsers synthesise dblclick on top of our own double-tap; taking
+      // both would add two people for one gesture.
+      if (Date.now() - touchDoubleAt < 700) return;
       emit('dblclick-empty', toWorld(e.clientX, e.clientY));
     });
+    // Touch: a quick double-tap on empty canvas adds a person, since synthetic
+    // dblclick does not reliably survive `touch-action: none`.
+    viewport.addEventListener('pointerup', (e) => {
+      if (e.pointerType !== 'touch') return;
+      if (e.target.closest('.bubble') || e.target.closest('.edge') || e.target.closest('.b-handle')) { lastTap = 0; return; }
+      const now = Date.now();
+      const near = lastTapAt && Math.hypot(e.clientX - lastTapAt.x, e.clientY - lastTapAt.y) < 28;
+      if (now - lastTap < 320 && near) {
+        lastTap = 0;
+        touchDoubleAt = now;
+        emit('dblclick-empty', toWorld(e.clientX, e.clientY));
+      } else {
+        lastTap = now; lastTapAt = { x: e.clientX, y: e.clientY };
+      }
+    });
+
     viewport.addEventListener('contextmenu', (e) => {
       e.preventDefault();
       const bubble = e.target.closest('.bubble');

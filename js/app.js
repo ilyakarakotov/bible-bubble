@@ -34,6 +34,7 @@
     $$('.viewtabs .tab').forEach(t => t.classList.toggle('is-active', t.dataset.view === v));
     if (v === 'timeline') { BB.timeline.show(); } else { BB.timeline.hide(); C.render(); }
     S.setPref('view', v);
+    paintMobileBar();
   }
 
   /* ================= placement helpers ================= */
@@ -180,6 +181,7 @@
   /** Bring a person into view in whichever view is open. */
   function revealPerson(id) {
     C.select([id]);
+    if (isPhone()) closePanels();
     if (currentView === 'canvas') C.focus(id, { zoom: 0.95 });
     else BB.timeline.draw();
   }
@@ -287,6 +289,15 @@
     const r = anchorEl.getBoundingClientRect();
     const st = S.settings();
     menu(r.left - 130, r.bottom + 6, [
+      { head: 'Edit' },
+      { label: 'Undo', icon: 'undo', key: '⌘Z', disabled: !S.canUndo, run: () => { if (!S.undo()) U.toast('Nothing to undo'); } },
+      { label: 'Redo', icon: 'redo', key: '⇧⌘Z', disabled: !S.canRedo, run: () => { if (!S.redo()) U.toast('Nothing to redo'); } },
+      '-',
+      { label: 'Tidy into generations', icon: 'layout', key: 'L', run: () => autoLayout(C.selected().length > 1 ? C.selected() : null) },
+      { label: 'Fit everything on screen', icon: 'fit', key: 'F', run: () => C.fit() },
+      { label: 'Back to the head of the line', icon: 'target', key: '0', run: () => C.home() },
+      { label: 'Switch theme', icon: 'sun', run: toggleTheme },
+      '-',
       { head: 'Board' },
       { label: 'Board settings…', icon: 'book', run: boardSettings },
       { label: 'Load the starter lineage', icon: 'people', run: () => confirmSeed() },
@@ -645,6 +656,7 @@
     const go = (id) => {
       box.hidden = true;
       input.blur();
+      if (isPhone()) { toggleSearch(false); closePanels(); }
       C.select([id]);
       if (currentView === 'canvas') C.focus(id, { zoom: 0.95 });
       else BB.timeline.draw();
@@ -673,6 +685,8 @@
 
       if (e.key === 'Escape') {
         if (!$('#modal-root').hidden) { $('#modal-root').hidden = true; $('#modal-root').replaceChildren(); return; }
+        if ($('#app').classList.contains('search-open')) { toggleSearch(false); return; }
+        if (isPhone() && anyPanelOpen()) { closePanels(); return; }
         closeMenu();
         if (typing) { e.target.blur(); return; }
         if (C.trace) { C.setTrace(null); return; }
@@ -749,6 +763,80 @@
     ], { sticky: true });
   }
 
+  /* ================= phone layout ================= */
+  const phoneQuery = window.matchMedia('(max-width: 700px)');
+  const isPhone = () => phoneQuery.matches;
+
+  /** Only one sheet at a time, and the backdrop follows whichever is open. */
+  function setPanel(name, open) {
+    const app = $('#app');
+    const cls = 'panel-' + name;
+    const other = name === 'lineage' ? 'panel-details' : 'panel-lineage';
+    if (open) { app.classList.add(cls); app.classList.remove(other); }
+    else app.classList.remove(cls);
+    const any = app.classList.contains('panel-lineage') || app.classList.contains('panel-details');
+    $('#sheet-backdrop').hidden = !any;
+    paintMobileBar();
+    if (open && name === 'details') BB.inspector.refresh(true);
+  }
+  const closePanels = () => { setPanel('lineage', false); setPanel('details', false); };
+  const anyPanelOpen = () => $('#app').classList.contains('panel-lineage') || $('#app').classList.contains('panel-details');
+
+  function paintMobileBar() {
+    const app = $('#app');
+    const state = {
+      lineage: app.classList.contains('panel-lineage'),
+      details: app.classList.contains('panel-details'),
+      canvas: currentView === 'canvas',
+      timeline: currentView === 'timeline',
+    };
+    $$('.mb-item').forEach(b => b.classList.toggle('is-active', !!state[b.dataset.mb]));
+    const label = $('#mb-details-label');
+    if (label) {
+      const sel = C.selected();
+      const p = sel.length === 1 ? S.person(sel[0]) : null;
+      label.textContent = sel.length > 1 ? sel.length + ' selected'
+        : (p && p.name) ? p.name : 'Details';
+    }
+  }
+
+  function toggleSearch(open) {
+    const app = $('#app');
+    app.classList.toggle('search-open', open);
+    if (open) requestAnimationFrame(() => $('#search-input').focus());
+    else { $('#search-input').blur(); $('#search-results').hidden = true; }
+  }
+
+  function initMobile() {
+    $$('.mb-item').forEach(b => b.addEventListener('click', () => {
+      const which = b.dataset.mb;
+      if (which === 'canvas' || which === 'timeline') { closePanels(); setView(which); }
+      else setPanel(which, !$('#app').classList.contains('panel-' + which));
+    }));
+    $('#sheet-backdrop').addEventListener('click', closePanels);
+
+    // a swipe down on the details sheet header closes it
+    const insp = $('#inspector');
+    let sy = null;
+    insp.addEventListener('touchstart', (e) => {
+      sy = (insp.scrollTop <= 0 && e.touches.length === 1) ? e.touches[0].clientY : null;
+    }, { passive: true });
+    insp.addEventListener('touchmove', (e) => {
+      if (sy == null) return;
+      if (e.touches[0].clientY - sy > 70) { sy = null; setPanel('details', false); }
+    }, { passive: true });
+
+    const sync = () => {
+      const phone = isPhone();
+      $('#app').classList.toggle('is-phone', phone);
+      if (!phone) { closePanels(); toggleSearch(false); }
+      paintMobileBar();
+    };
+    phoneQuery.addEventListener ? phoneQuery.addEventListener('change', sync) : phoneQuery.addListener(sync);
+    window.addEventListener('orientationchange', () => setTimeout(sync, 120));
+    sync();
+  }
+
   /* ================= boot ================= */
   function init() {
     S = BB.store; L = BB.lineage; C = BB.canvas;
@@ -766,6 +854,7 @@
     refreshBoards();
     initSearch();
     initKeys();
+    initMobile();
 
     /* toolbar */
     document.addEventListener('click', (e) => {
@@ -788,6 +877,8 @@
         'toggle-sidebar': () => $('#app').classList.toggle('sidebar-hidden'),
         'trace-off': () => C.setTrace(null),
         'load-seed': confirmSeed,
+        'search-open': () => toggleSearch(true),
+        'search-close': () => toggleSearch(false),
       }[act];
       if (run) { e.preventDefault(); run(); }
     });
@@ -837,7 +928,10 @@
       quickRelative(from, kind, '', moved ? at : null);
     });
     C.on('trace', paintTraceBar);
-    C.on('select', () => { if (currentView === 'timeline') BB.timeline.draw(); });
+    C.on('select', () => {
+      if (currentView === 'timeline') BB.timeline.draw();
+      paintMobileBar();
+    });
 
     /* status bar */
     const paintStatus = () => {
@@ -879,6 +973,7 @@
   BB.app = {
     init, quickRelative, pickPerson, duplicatePerson, deleteSelected, autoLayout,
     toggleTrace, revealPerson, showOnCanvas, setView, helpModal, confirmSeed,
+    isPhone, setPanel, closePanels,
   };
 
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init);

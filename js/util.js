@@ -21,7 +21,7 @@ window.BB = window.BB || {};
         if (v === null || v === undefined || v === false) continue;
         if (k === 'text') node.textContent = v;
         else if (k === 'html') node.innerHTML = v;
-        else if (k === 'style' && typeof v === 'object') Object.assign(node.style, v);
+        else if (k === 'style' && typeof v === 'object') setStyle(node, v);
         else if (k.startsWith('on') && typeof v === 'function') node.addEventListener(k.slice(2), v);
         else if (k === 'dataset') Object.assign(node.dataset, v);
         else node.setAttribute(k, v === true ? '' : v);
@@ -32,6 +32,19 @@ window.BB = window.BB || {};
       node.appendChild(typeof k === 'string' || typeof k === 'number' ? document.createTextNode(String(k)) : k);
     });
     return node;
+  }
+
+  /**
+   * Apply a style object. Custom properties need setProperty — assigning them
+   * onto the style object does nothing at all, silently.
+   */
+  function setStyle(node, styles) {
+    for (const k in styles) {
+      const v = styles[k];
+      if (v === null || v === undefined) continue;
+      if (k.startsWith('--')) node.style.setProperty(k, String(v));
+      else node.style[k] = v;
+    }
   }
 
   /** Inline <svg><use href="#id"></svg> */
@@ -216,7 +229,7 @@ window.BB = window.BB || {};
   }
 
   BB.util = {
-    $, $$, el, icon, svgEl, uid, clamp, isNum, deepClone, escapeHtml, debounce, rafThrottle,
+    $, $$, el, icon, svgEl, setStyle, uid, clamp, isNum, deepClone, escapeHtml, debounce, rafThrottle,
     plural, fold, PALETTE, PALETTE_KEYS, colorOf, colorHex,
     DEFAULT_AM_ZERO_BC, bcToAm, adToAm, parseYear, amToEra, formatYear, formatSpan,
     toast, rectsOverlap, edgeAnchor,
