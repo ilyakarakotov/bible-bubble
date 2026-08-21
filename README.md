@@ -87,11 +87,12 @@ or a mouse. **A person's circle grows with the number of connections they have**
 so the hubs of a board show themselves without being told.
 
 Hover anyone to light up their neighbours and dim the rest. Filter to lineage
-only, or to connections only, and watch the shape change. Colour by era,
-generation or connection count. And two questions the other views cannot answer
-sit in the side panel: **who is most connected**, and **how far apart are these
-two** — pick any pair and it counts the hops through every kind of relationship
-and shows you the chain, each step named.
+only, or to connections only, and watch the shape change. Colour by era, by
+generation, by how many links a person carries, or by the colour you gave the
+bubble on the canvas. And two questions the other views cannot answer sit in
+the side panel: **who is most connected**, and **how far apart are these two** —
+pick any pair and it counts the steps through every kind of relationship and
+shows you the chain, each one named.
 
 ![The web of connections](docs/web.png)
 
@@ -107,7 +108,7 @@ died in the very year of the Flood.
 ![The timeline with the year scrubber](docs/timeline.png)
 
 ### On a phone
-The whole thing works one-handed. A bottom bar carries the four places you go —
+The whole thing works one-handed. A bottom bar carries the five places you go —
 **Lineage**, **Canvas**, **Web**, **Timeline**, and **Details** (which shows the
 selected person's name, so you always know what you have got hold of).
 
