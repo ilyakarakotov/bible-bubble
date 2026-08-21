@@ -78,6 +78,8 @@ confused with lineage, they are listed on each person's card, they turn up in
 search (look for `covenant` and you get everyone who kept one), and they travel
 with your Markdown and CSV exports.
 
+![Absalom's connections on the canvas and in the panel](docs/connections.png)
+
 ### The web
 The third view is the whole board at once: a circle for every person, a line for
 every link, arranged by a force simulation that you can pull about with a finger
@@ -90,6 +92,8 @@ generation or connection count. And two questions the other views cannot answer
 sit in the side panel: **who is most connected**, and **how far apart are these
 two** — pick any pair and it counts the hops through every kind of relationship
 and shows you the chain, each step named.
+
+![The web of connections](docs/web.png)
 
 ### The timeline
 Every life on one axis. Because Genesis gives exact ages, the antediluvian
@@ -113,17 +117,18 @@ double-tap empty canvas to add someone. Details opens as a sheet over the
 canvas — flick it down to dismiss — so the bubble you are editing stays in view.
 
 <p align="center">
-  <img src="docs/mobile-canvas.png" alt="The canvas on a phone" width="30%">
-  <img src="docs/mobile-details.png" alt="The details sheet" width="30%">
-  <img src="docs/mobile-timeline.png" alt="The timeline on a phone" width="30%">
+  <img src="docs/mobile-canvas.png" alt="The canvas on a phone" width="23%">
+  <img src="docs/mobile-details.png" alt="The details sheet" width="23%">
+  <img src="docs/mobile-web.png" alt="The web on a phone" width="23%">
+  <img src="docs/mobile-timeline.png" alt="The timeline on a phone" width="23%">
 </p>
 
 ### Everything else
-Multiple boards, full undo/redo, search across names, notes and references, a
-lineage outline in the sidebar, a tidy auto-layout that arranges the whole board
-into generations, light and dark themes, and export to JSON, Markdown or CSV.
-The layout adapts from a phone up to a wide desktop, and every control is sized
-for a finger on touch devices.
+Multiple boards, full undo/redo, search across names, notes, references and
+connections, a lineage outline in the sidebar, a tidy auto-layout that arranges
+the whole board into generations, light and dark themes, and export to JSON,
+Markdown or CSV. The layout adapts from a phone up to a wide desktop, and every
+control is sized for a finger on touch devices.
 
 ![Dark theme](docs/dark.png)
 
@@ -214,12 +219,21 @@ console error:
 ```bash
 npm install --no-save playwright
 node test/smoke.js          # HEADED=1 to watch it
+node test/touch.js          # the same app at 390x844, with a finger
 ```
 
-It covers loading the starter board, search, tracing, the timeline and scrubber,
-building a line by dragging handles, cycle refusal, editing that survives a
-reload, the auto-layout leaving no overlaps, board switching, and import
-sanitising malformed files.
+`smoke.js` covers loading the starter board, search, tracing, the timeline and
+scrubber, building a line by dragging handles, cycle refusal, editing that
+survives a reload, the auto-layout leaving no overlaps, board switching, import
+sanitising malformed files, and the connections and web view — that every
+connection names two real people and reads correctly from both ends, that the
+same pair can hold two kinds of connection but not two of a kind, that the web
+actually paints, that the most-connected list agrees with the graph, and that
+the hop count between two people is real.
+
+`touch.js` drives the phone layout: the bottom bar, the sheets, finger-sized
+handles, long-press, pinch, double-tap, and every view without the page ever
+scrolling sideways.
 
 ---
 

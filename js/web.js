@@ -17,7 +17,7 @@
   let S, L, C;
 
   /* ---------- dom ---------- */
-  let root, stage, cv, ctx, tipEl, emptyEl, sideEl, sideBtn, rankEl, pathA, pathB, pathOut;
+  let root, stage, cv, ctx, tipEl, emptyEl, sideBtn, rankEl, pathA, pathB, pathOut;
   let spreadEl, colorEl, labelsEl, isolatedEl;
 
   /* ---------- graph ---------- */
@@ -317,14 +317,11 @@
     const v = (name, fb) => ((cs.getPropertyValue(name) || '').trim() || fb);
     const t = {
       bg: v('--bg', '#f4f0e8'),
-      panel: v('--panel', '#fff'),
       ink: v('--ink', '#2c2721'),
       ink2: v('--ink-2', '#5d5548'),
       ink3: v('--ink-3', '#8b8172'),
-      line: v('--line', '#ddd5c5'),
       accent: v('--accent', '#b4802f'),
       link: v('--link', '#a8935f'),
-      linkStrong: v('--link-strong', '#8a6a2a'),
       hue: {},
     };
     U.PALETTE_KEYS.forEach(k => { t.hue[k] = v('--c-' + k, '#8d8b84'); });
@@ -356,7 +353,7 @@
   function nodeColor(n, t) {
     if (opts.color === 'bubble') return t.hue[U.colorOf(n.p.color)];
     if (opts.color === 'generation') {
-      const g = (L && typeof L.generationOf === 'function') ? L.generationOf(n.id, S.doc) : 0;
+      const g = L.generationOf(n.id, S.doc);
       return t.hue[U.PALETTE_KEYS[g % U.PALETTE_KEYS.length]];
     }
     if (opts.color === 'degree') {
@@ -914,7 +911,6 @@
 
     tipEl = $('#web-tip');
     emptyEl = $('#web-empty');
-    sideEl = $('#web-side');
     sideBtn = $('#web-side-btn');
     rankEl = $('#web-rank');
     pathA = $('#web-path-a');
