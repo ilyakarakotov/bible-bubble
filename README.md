@@ -17,8 +17,10 @@ step, no dependencies and no account.
 
 ## Try it
 
-**Open `index.html`.** That is the whole install — clone or download the repo and
-double-click the file, or serve the folder:
+**[ilyakarakotov.github.io/bible-bubble](https://ilyakarakotov.github.io/bible-bubble/)**
+
+Or run it locally — **open `index.html`.** That is the whole install: clone or
+download the repo and double-click the file, or serve the folder:
 
 ```bash
 git clone https://github.com/ilyakarakotov/bible-bubble.git
@@ -26,8 +28,9 @@ cd bible-bubble
 python3 -m http.server 8000   # then open http://localhost:8000
 ```
 
-To put it online, switch on GitHub Pages for the repository
-(**Settings → Pages → Deploy from a branch → `main` / root**) and it serves as-is.
+Hosting it yourself takes one dropdown and no build step: **Settings → Pages →
+Source: Deploy from a branch → `main` → `/ (root)` → Save**. GitHub then serves
+the files as they are and re-publishes on every push.
 
 On first run it offers to start you from **Adam** with 105 people already filled
 in — the line down to Jesus, with ages, dates, scripture references and
