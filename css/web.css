@@ -1,0 +1,144 @@
+/* ============================================================
+   Bible Bubble — the web view: circles for people, threads for links
+   ============================================================ */
+
+/* ---------- which view is on ---------- */
+#app.view-web .viewport { display: none; }
+#app.view-web #timeline { display: none; }
+#app:not(.view-web) #web { display: none; }
+
+.web {
+  position: absolute; inset: 0;
+  display: flex; flex-direction: column;
+  background: var(--bg);
+  min-height: 0;
+}
+
+/* ---------- toolbar ---------- */
+.web-toolbar {
+  display: flex; align-items: center; gap: 12px; padding: 8px 12px;
+  border-bottom: 1px solid var(--line); background: var(--panel); flex-wrap: wrap;
+}
+.web-modes { display: flex; gap: 4px; }
+.web-toolbar input[type="range"] {
+  width: 104px; padding: 0; flex: none;
+  accent-color: var(--accent); background: transparent; border: 0; cursor: pointer;
+}
+.web-toolbar input[type="range"]:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
+
+/* ---------- stage ---------- */
+.web-body { flex: 1; display: flex; min-height: 0; position: relative; }
+.web-stage {
+  position: relative; flex: 1; min-width: 0; min-height: 0;
+  overflow: hidden; background: var(--bg);
+  touch-action: none; contain: strict;
+}
+#web-canvas { display: block; width: 100%; height: 100%; }
+
+.web-tip {
+  position: absolute; left: 0; top: 0; z-index: 6; max-width: 236px;
+  display: flex; flex-direction: column; gap: 1px;
+  padding: 7px 10px 8px;
+  background: color-mix(in srgb, var(--panel) 94%, transparent);
+  backdrop-filter: blur(8px);
+  border: 1px solid var(--line); border-radius: 10px; box-shadow: var(--shadow-md);
+  pointer-events: none;
+}
+.web-tip strong { font-family: var(--serif); font-size: 14.5px; font-weight: 600; line-height: 1.25; }
+.web-tip-role { font-size: 11.5px; color: var(--ink-2); }
+.web-tip-when { font-size: 11.5px; color: var(--ink-3); font-variant-numeric: tabular-nums; }
+.web-tip-deg { font-size: 11.5px; color: var(--accent-ink); margin-top: 3px; }
+
+.web-empty {
+  position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
+  text-align: center; padding: 24px; pointer-events: none; color: var(--ink-3);
+}
+.web-empty p { max-width: 340px; font-size: 13.5px; line-height: 1.6; }
+
+/* ---------- side panel ---------- */
+.web-side {
+  width: 268px; flex: none; display: none; flex-direction: column;
+  background: var(--panel); border-left: 1px solid var(--line);
+  overflow: auto; min-height: 0; z-index: 5;
+}
+#web.is-side-open .web-side { display: flex; }
+
+.web-panel { border-bottom: 1px solid var(--line-soft); padding: 11px 12px 13px; }
+.web-panel:last-child { border-bottom: 0; }
+.web-panel > h3 {
+  font-size: 10.5px; text-transform: uppercase; letter-spacing: .07em; color: var(--ink-3);
+  margin-bottom: 8px; font-weight: 600;
+}
+.web-none { font-size: 12px; color: var(--ink-3); line-height: 1.55; }
+
+.web-pair { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+.web-pair select { height: 30px; padding: 0 24px 0 8px; font-size: 12.5px; background-position: calc(100% - 12px) 14px, calc(100% - 7px) 14px; }
+
+.web-path-out { margin-top: 9px; }
+.web-path-lead { font-size: 13px; color: var(--ink); line-height: 1.5; margin-bottom: 6px; }
+.web-step {
+  display: flex; align-items: center; gap: 5px; flex-wrap: wrap;
+  padding: 4px 0; font-size: 12px; color: var(--ink-3);
+}
+.web-step + .web-step { border-top: 1px solid var(--line-soft); }
+.web-step-name {
+  border: 0; background: transparent; padding: 0; cursor: pointer;
+  font-family: var(--serif); font-size: 12.5px; color: var(--ink-2); text-align: left;
+}
+.web-step-name:hover { color: var(--accent-ink); text-decoration: underline; }
+.web-step-via { font-size: 11px; color: var(--ink-3); }
+
+.web-rank { display: flex; flex-direction: column; gap: 1px; }
+.web-rank-row {
+  display: flex; align-items: center; gap: 7px; width: 100%;
+  min-height: 28px; padding: 4px 7px; border: 0; border-radius: 7px;
+  background: transparent; color: inherit; cursor: pointer; text-align: left;
+}
+.web-rank-row:hover { background: var(--panel-2); }
+.web-rank-row .n { font-family: var(--serif); font-size: 13px; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.web-rank-row .c {
+  font-size: 11px; color: var(--ink-3); font-variant-numeric: tabular-nums;
+  background: var(--bg-sunk); border-radius: 999px; padding: 1px 7px; flex: none;
+}
+.web-rank-row:hover .c { color: var(--accent-ink); background: var(--accent-soft); }
+
+/* ---------- touch ---------- */
+@media (pointer: coarse) {
+  .web-toolbar select, .web-pair select { font-size: 16px; }
+  .web-toolbar select { height: 32px; }
+  .web-pair select { height: 40px; background-position: calc(100% - 12px) 19px, calc(100% - 7px) 19px; }
+  .web-toolbar input[type="range"] { height: 40px; }
+  .web-rank-row { min-height: 40px; }
+  .web-step-name { min-height: 26px; }
+}
+
+/* ---------- phone ---------- */
+@media (max-width: 700px) {
+  .web-toolbar { gap: 8px; padding: 7px 9px; overflow-x: auto; flex-wrap: nowrap; }
+  .web-toolbar::-webkit-scrollbar { display: none; }
+  .web-toolbar > * { flex: none; }
+  .web-toolbar input[type="range"] { width: 88px; }
+
+  /* The panel is a sheet over the web rather than half the screen. It sits
+     inside the stage, which already stops above the bottom navigation bar. */
+  .web-side {
+    position: absolute; left: 0; right: 0; bottom: 0; top: auto;
+    width: 100%; max-height: min(58%, 420px);
+    border-left: 0; border-top: 1px solid var(--line);
+    border-radius: 16px 16px 0 0;
+    box-shadow: var(--shadow-lg);
+    padding-bottom: env(safe-area-inset-bottom);
+  }
+  #web.is-side-open .web-side { display: flex; }
+  .web-side::before {
+    content: ""; display: block; flex: none;
+    width: 38px; height: 4px; margin: 8px auto 2px;
+    border-radius: 999px; background: var(--line);
+  }
+  .web-tip { max-width: min(236px, calc(100vw - 24px)); }
+}
+
+/* Landscape phones have no room for a tall sheet. */
+@media (max-width: 900px) and (max-height: 500px) {
+  .web-side { max-height: 76%; }
+}

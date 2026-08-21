@@ -4,27 +4,58 @@
   const U = BB.util;
 
   /* ---------- relation index (memoised per store revision) ---------- */
-  let cache = { rev: -1, idx: null };
+  let cache = { rev: -1, doc: null, idx: null };
+
+  /* Heavier answers computed on demand and thrown away with their index. */
+  const derived = new WeakMap();
+  function derivedOf(idx) {
+    let d = derived.get(idx);
+    if (!d) derived.set(idx, d = { comps: null, rank: null, paths: new Map() });
+    return d;
+  }
 
   function build(doc) {
     const parents = new Map();   // childId  -> [parentId]
     const children = new Map();  // parentId -> [childId]
     const spouses = new Map();   // id -> [id]
-    const other = new Map();     // id -> [{id, label}]
+    const bonds = new Map();     // id -> [{id, linkId, kind, label, note, dir}]
+    const adj = new Map();       // id -> [{id, via, kind, linkId, label}] — one entry per link
     const ids = Object.keys(doc.people);
-    ids.forEach(id => { parents.set(id, []); children.set(id, []); spouses.set(id, []); other.set(id, []); });
+    ids.forEach(id => {
+      parents.set(id, []); children.set(id, []); spouses.set(id, []);
+      bonds.set(id, []); adj.set(id, []);
+    });
+
+    // The undirected walk every graph query rides on: built once, here, so no
+    // query ever has to walk doc.links again.
+    const edgeSeen = new Map();                   // id -> Set(linkId)
+    const touch = (a, b, via, kind, l) => {
+      let seen = edgeSeen.get(a);
+      if (!seen) edgeSeen.set(a, seen = new Set());
+      if (seen.has(l.id)) return;                 // one link is one neighbour
+      seen.add(l.id);
+      adj.get(a).push({ id: b, via, kind, linkId: l.id, label: l.label || '' });
+    };
 
     Object.values(doc.links).forEach(l => {
       if (!doc.people[l.from] || !doc.people[l.to]) return;
       if (l.type === 'parent') {
         children.get(l.from).push(l.to);
         parents.get(l.to).push(l.from);
+        touch(l.to, l.from, 'parent', '', l);
+        touch(l.from, l.to, 'child', '', l);
       } else if (l.type === 'spouse') {
         spouses.get(l.from).push(l.to);
         spouses.get(l.to).push(l.from);
+        touch(l.from, l.to, 'spouse', '', l);
+        touch(l.to, l.from, 'spouse', '', l);
       } else {
-        other.get(l.from).push({ id: l.to, label: l.label, dir: 'out' });
-        other.get(l.to).push({ id: l.from, label: l.label, dir: 'in' });
+        const kind = BB.model.bondKind(l.kind).id;
+        const note = l.note || '';
+        bonds.get(l.from).push({ id: l.to, linkId: l.id, kind, label: l.label || '', note, dir: 'out' });
+        bonds.get(l.to).push({ id: l.from, linkId: l.id, kind, label: l.label || '', note, dir: 'in' });
+        touch(l.from, l.to, 'bond', kind, l);
+        touch(l.to, l.from, 'bond', kind, l);
       }
     });
 
@@ -62,14 +93,16 @@
     }
     ids.forEach(calcDepth);
 
-    return { parents, children, spouses, other, roots, depth, ids, byOrder };
+    // `other` is the old name for `bonds` — same map, so both readings agree.
+    return { parents, children, spouses, bonds, other: bonds, adj, roots, depth, ids, byOrder };
   }
 
   function index(doc) {
     const S = BB.store;
-    if (cache.rev === S.rev && cache.idx) return cache.idx;
-    const idx = build(doc || S.doc);
-    cache = { rev: S.rev, idx };
+    const d = doc || S.doc;
+    if (cache.rev === S.rev && cache.doc === d && cache.idx) return cache.idx;
+    const idx = build(d);
+    cache = { rev: S.rev, doc: d, idx };
     return idx;
   }
 
@@ -77,8 +110,128 @@
   const parentsOf  = (id, doc) => (index(doc).parents.get(id) || []).slice();
   const childrenOf = (id, doc) => (index(doc).children.get(id) || []).slice();
   const spousesOf  = (id, doc) => Array.from(new Set(index(doc).spouses.get(id) || []));
-  const othersOf   = (id, doc) => (index(doc).other.get(id) || []).slice();
+  const bondsOf    = (id, doc) => (index(doc).bonds.get(id) || []).slice();
+  const othersOf   = bondsOf;                      // the name this had before bonds
   const generationOf = (id, doc) => index(doc).depth.get(id) || 0;
+
+  /** Every link touching this person, once per link. */
+  const neighbours = (id, doc) => (index(doc).adj.get(id) || []).slice();
+
+  /** How many links of each sort this person has. */
+  function degree(id, doc) {
+    const list = index(doc).adj.get(id) || [];
+    const out = { parents: 0, children: 0, spouses: 0, bonds: 0, total: list.length };
+    for (let i = 0; i < list.length; i++) {
+      const via = list[i].via;
+      if (via === 'parent') out.parents++;
+      else if (via === 'child') out.children++;
+      else if (via === 'spouse') out.spouses++;
+      else out.bonds++;
+    }
+    return out;
+  }
+
+  /* ---------- how far apart ---------- */
+  const VIA_NAMES = { parent: 'parent', child: 'child', spouse: 'spouse', bond: 'bond', other: 'bond' };
+
+  /** opts.via -> a Set of relations we may walk, or null for all of them. */
+  function viaFilter(via) {
+    if (via === null || via === undefined) return null;
+    // Anything iterable: an array, a Set, one bare name. instanceof would miss a
+    // Set made in another frame.
+    const iterable = typeof via !== 'string' && via[Symbol.iterator];
+    const list = iterable ? Array.from(via) : [via];
+    const set = new Set();
+    list.forEach(v => { const name = VIA_NAMES[v]; if (name) set.add(name); });
+    return set;
+  }
+
+  function walkBack(prev, a, b) {
+    const steps = [];
+    let cur = b;
+    while (cur !== a) {
+      const back = prev.get(cur), e = back.edge;
+      steps.push({ from: back.from, to: cur, via: e.via, kind: e.kind || '', linkId: e.linkId, label: e.label || '' });
+      cur = back.from;
+    }
+    steps.reverse();
+    return { hops: steps.length, ids: [a].concat(steps.map(s => s.to)), steps };
+  }
+
+  function breadthFirst(idx, a, b, allow) {
+    if (a === b) return { hops: 0, ids: [a], steps: [] };
+    const prev = new Map([[a, null]]);
+    const queue = [a];
+    for (let head = 0; head < queue.length; head++) {
+      const list = idx.adj.get(queue[head]) || [];
+      for (let i = 0; i < list.length; i++) {
+        const e = list[i];
+        if (allow && !allow.has(e.via)) continue;
+        if (prev.has(e.id)) continue;
+        prev.set(e.id, { from: queue[head], edge: e });
+        if (e.id === b) return walkBack(prev, a, b);
+        queue.push(e.id);
+      }
+    }
+    return null;
+  }
+
+  /**
+   * Fewest hops between two people over the undirected union of every link —
+   * "how many connections apart are these two". opts.via limits which relations
+   * may be walked. Null when there is no route at all.
+   */
+  function connectionPath(a, b, doc, opts) {
+    const idx = index(doc);
+    if (!idx.adj.has(a) || !idx.adj.has(b)) return null;      // not on this board
+    const allow = viaFilter((opts || {}).via);
+    const memo = derivedOf(idx).paths;
+    const key = a + '>' + b + '|' + (allow ? Array.from(allow).sort().join(',') : '*');
+    let found;
+    if (memo.has(key)) found = memo.get(key);
+    else { found = breadthFirst(idx, a, b, allow); memo.set(key, found); }
+    return found ? { hops: found.hops, ids: found.ids.slice(), steps: found.steps.slice() } : null;
+  }
+
+  /** Islands of people joined by any link, largest first. */
+  function componentList(idx) {
+    const d = derivedOf(idx);
+    if (d.comps) return d.comps;
+    const seen = new Set(), out = [];
+    idx.ids.forEach(start => {
+      if (seen.has(start)) return;
+      seen.add(start);
+      const group = [start];
+      for (let head = 0; head < group.length; head++) {
+        const list = idx.adj.get(group[head]) || [];
+        for (let i = 0; i < list.length; i++) {
+          const next = list[i].id;
+          if (seen.has(next)) continue;
+          seen.add(next); group.push(next);
+        }
+      }
+      out.push(group);
+    });
+    out.sort((x, y) => y.length - x.length);
+    d.comps = out;
+    return out;
+  }
+  const components = (doc) => componentList(index(doc)).map(g => g.slice());
+
+  /** People by how many links they have, most first, then by name. */
+  function ranking(doc, limit) {
+    const src = doc || BB.store.doc;
+    const idx = index(src);
+    const d = derivedOf(idx);
+    if (!d.rank) {
+      const nameOf = (id) => (src.people[id] && src.people[id].name) || '';
+      const rows = idx.ids.map(id => ({ id, degree: (idx.adj.get(id) || []).length }));
+      rows.sort((x, y) => (y.degree - x.degree) || nameOf(x.id).localeCompare(nameOf(y.id)));
+      d.rank = rows;
+    }
+    const n = (limit === null || limit === undefined || limit < 0) ? d.rank.length : limit;
+    return d.rank.slice(0, n).map(r => ({ id: r.id, degree: r.degree }));
+  }
 
   /** Every ancestor of `id` (not including `id`). */
   function ancestors(id, doc) {
@@ -321,14 +474,19 @@
 
   /* ---------- board statistics ---------- */
   function stats(doc) {
-    const idx = index(doc);
-    const people = Object.values(doc.people);
+    const d = doc || BB.store.doc;
+    const idx = index(d);
+    const people = Object.values(d.people);
+    const links = Object.values(d.links);
     const dated = people.filter(p => U.isNum(p.birth) || U.isNum(p.death));
     const ages = people.filter(p => U.isNum(p.age)).map(p => p.age);
     const gens = idx.ids.length ? Math.max(...idx.ids.map(id => idx.depth.get(id) || 0)) + 1 : 0;
     return {
       people: people.length,
-      links: Object.keys(doc.links).length,
+      links: links.length,
+      bonds: links.filter(l => l.type === 'other').length,
+      components: componentList(idx).length,
+      topConnected: ranking(d, 5),
       generations: gens,
       dated: dated.length,
       roots: idx.roots.length,
@@ -341,7 +499,8 @@
   }
 
   BB.lineage = {
-    index, parentsOf, childrenOf, spousesOf, othersOf, generationOf,
+    index, parentsOf, childrenOf, spousesOf, othersOf, bondsOf, generationOf,
     ancestors, descendants, pathToRoot, lineBetween, layout, outline, stats,
+    degree, neighbours, connectionPath, components, ranking,
   };
 })(window.BB);

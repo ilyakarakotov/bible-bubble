@@ -3,9 +3,12 @@
 An infinite canvas for tracking **who came from who**.
 
 Make a bubble for a person, write down their age, their references and what they
-were known for, then link them to their sons and daughters. The line grows as you
-go, and at any point you can trace a name back to its root or drop the whole
-board onto one timeline and see which lives overlapped.
+were known for, then link them to their sons and daughters. Not every tie is a
+bloodline, so you can also record the ones that aren't — who taught whom, who
+fought whom, who kept covenant with whom. The line grows as you go, and at any
+point you can trace a name back to its root, drop the whole board onto one
+timeline to see which lives overlapped, or open the **web** and watch the whole
+board as one graph of who touched whose life.
 
 Built as a personal note-taking and memory device: everything you write stays in
 your own browser, and the whole app is a handful of static files with no build
@@ -61,6 +64,32 @@ with every name clickable.
 
 ![Tracing a line of descent](docs/trace.png)
 
+### Connections that are not lineage
+A family tree only holds one kind of relationship, and most of the story is in
+the others. Right-click a bubble and choose **Connect to someone…** to record a
+tie that is not descent: mentor, rival, ally, prophet to, anointed, in covenant
+with, rescued, harmed, kin, met. Each one takes a sentence in your own words and
+a reference, and each end reads correctly on its own — Elijah is *mentor of*
+Elisha, and on Elisha's card the same link reads *taught by* Elijah.
+
+Connections are drawn on the canvas as bowed, coloured arcs so they never get
+confused with lineage, they are listed on each person's card, they turn up in
+search (look for `covenant` and you get everyone who kept one), and they travel
+with your Markdown and CSV exports.
+
+### The web
+The third view is the whole board at once: a circle for every person, a line for
+every link, arranged by a force simulation that you can pull about with a finger
+or a mouse. **A person's circle grows with the number of connections they have**,
+so the hubs of a board show themselves without being told.
+
+Hover anyone to light up their neighbours and dim the rest. Filter to lineage
+only, or to connections only, and watch the shape change. Colour by era,
+generation or connection count. And two questions the other views cannot answer
+sit in the side panel: **who is most connected**, and **how far apart are these
+two** — pick any pair and it counts the hops through every kind of relationship
+and shows you the chain, each step named.
+
 ### The timeline
 Every life on one axis. Because Genesis gives exact ages, the antediluvian
 staircase and the collapse in lifespans after the Flood are visible at a glance.
@@ -74,8 +103,8 @@ died in the very year of the Flood.
 
 ### On a phone
 The whole thing works one-handed. A bottom bar carries the four places you go —
-**Lineage**, **Canvas**, **Timeline**, and **Details** (which shows the selected
-person's name, so you always know what you have got hold of).
+**Lineage**, **Canvas**, **Web**, **Timeline**, and **Details** (which shows the
+selected person's name, so you always know what you have got hold of).
 
 Tap a bubble to select it; its link handles grow to finger size. Press and hold
 for the same menu a right-click gives on a desktop. Pinch to zoom, drag to pan,
@@ -110,7 +139,7 @@ for a finger on touch devices.
 | `0` | Back to the head of the line |
 | `G` | Toggle the grid |
 | `/` | Search |
-| `1` `2` | Canvas / timeline |
+| `1` `2` `3` | Canvas / web / timeline |
 | `⌘Z` `⇧⌘Z` | Undo / redo |
 | `⌘A` `⌘D` | Select all / duplicate |
 | `Delete` | Remove the selection |
@@ -154,18 +183,21 @@ it is a starting point, not a reference work.
 
 ```
 index.html          markup and the icon sprite
-css/app.css         one stylesheet, themed with custom properties
+css/app.css         the main stylesheet, themed with custom properties
+css/web.css         styles for the web view
 js/util.js          helpers, the palette, year parsing and formatting
 js/store.js         document model, validation, undo history, localStorage
 js/seed.js          the Adam-to-Jesus starter board
-js/lineage.js       graph queries and the generational layout
+js/lineage.js       graph queries, degrees, paths and the generational layout
 js/canvas.js        viewport, bubbles, links, dragging, minimap
 js/inspector.js     the detail and editing panel
 js/timeline.js      the timeline and the year scrubber
+js/web.js           the force-directed web of connections
 js/sidebar.js       lineage outline and people list
 js/io.js            JSON / Markdown / CSV
 js/app.js           toolbar, menus, search, shortcuts
 test/smoke.js       end-to-end browser test
+test/touch.js       the same, on a phone-sized screen with touch
 ```
 
 Plain ES5-compatible scripts on a `BB` namespace — no bundler, no framework, no

@@ -12,7 +12,8 @@
   const bc = (y) => 4004 - y;   // BC year -> AM
 
   /* n=name, g=sex, b=birth(AM), a=age at death, d=death(AM),
-     r=role, e=era, refs, hl=highlights, kids, sp=spouses, x=approximate */
+     r=role, e=era, refs, hl=highlights, kids, sp=spouses,
+     par=parent already on the board, x=approximate */
   const PEOPLE = [
     /* ---------------- before the Flood ---------------- */
     { id:'adam', n:'Adam', g:'m', b:0, a:930, r:'The first man', e:'Before the Flood',
@@ -100,8 +101,19 @@
     { id:'terah', n:'Terah', g:'m', b:1878, a:205, e:'After the Flood', refs:['Gen 11:26–32','Josh 24:2'],
       hl:['Set out from Ur of the Chaldeans for Canaan, but settled in Haran and stayed.',
           'Served other gods beyond the River.'], kids:['abraham'] },
+    { id:'haran', n:'Haran', g:'m', r:'Son of Terah', e:'After the Flood', par:'terah',
+      refs:['Gen 11:26–31'],
+      hl:['Died in Ur of the Chaldeans, in his father’s lifetime and in the land of his birth.',
+          'Father of Lot, who went on to Canaan with Abraham.'],
+      kids:['lot'] },
 
     /* ---------------- the patriarchs ---------------- */
+    { id:'lot', n:'Lot', g:'m', r:'Abraham’s nephew', e:'The patriarchs', par:'haran',
+      refs:['Gen 12:5','Gen 13','Gen 14:12–16','Gen 19','2 Pet 2:7–8'],
+      hl:['Went with Abraham into Canaan, and chose the whole Jordan valley for himself.',
+          'Carried off when the four kings sacked Sodom, and brought back by his uncle.',
+          'Pulled out of the city by the hand as it burned; his wife looked back.',
+          'Called "righteous Lot, greatly distressed by the sensual conduct of the wicked".'] },
     { id:'abraham', n:'Abraham', g:'m', aka:['Abram'], b:2008, a:175, r:'Father of the faithful', e:'The patriarchs',
       refs:['Gen 12–25','Rom 4','Heb 11:8–19','Jas 2:23'],
       hl:['Called out of Ur: "Go from your country… and I will make of you a great nation."',
@@ -293,6 +305,11 @@
       hl:['Stole the hearts of Israel at the gate and took the kingdom by revolt.',
           'Caught by his head in an oak and killed against David’s orders.',
           '"O Absalom, my son, my son!"'] },
+    { id:'tamar_d', n:'Tamar', g:'f', r:'Daughter of David', e:'The united kingdom', par:'david',
+      refs:['2 Sam 13'],
+      hl:['Absalom’s sister, in the long robe with sleeves the king’s daughters wore.',
+          'Wronged by her half-brother Amnon and put out of doors.',
+          'Lived on, desolate, in her brother Absalom’s house.'] },
     { id:'nathan_s', n:'Nathan', g:'m', r:'Son of David', e:'The united kingdom', refs:['2 Sam 5:14','Luke 3:31','Zech 12:12'],
       hl:['Luke’s genealogy runs to Jesus through this son of David, not through Solomon.'] },
     { id:'solomon', n:'Solomon', g:'m', b:bc(990), d:bc(931), x:1, r:'King, builder of the temple', e:'The united kingdom',
@@ -322,6 +339,12 @@
       refs:['2 Kgs 8:16–24','2 Chr 21'],
       hl:['Married Athaliah of Ahab’s house and walked in their ways.',
           'Killed his own brothers to secure the throne; died unmourned.'], kids:['ahaziah_k'] },
+    { id:'athaliah', n:'Athaliah', g:'f', d:bc(835), x:1, r:'Queen of Judah, of the house of Ahab', e:'Kings of Judah',
+      refs:['2 Kgs 8:18','2 Kgs 11','2 Chr 22:10–23:21'],
+      hl:['Brought the ways of Ahab’s house into the line of David by marrying Joram.',
+          'Destroyed the royal family when her son died, and reigned six years herself.',
+          'Undone when Joash was crowned in the temple; put to death at the horses’ entrance.'],
+      kids:['ahaziah_k'], sp:['joram'] },
     { id:'ahaziah_k', n:'Ahaziah', g:'m', b:bc(864), a:23, x:1, r:'King of Judah', e:'Kings of Judah',
       refs:['2 Kgs 8:25–29','2 Chr 22:1–9'],
       hl:['Reigned one year; killed by Jehu alongside the house of Ahab.',
@@ -415,6 +438,64 @@
           'The offspring promised in Eden who crushes the serpent’s head.'] },
   ];
 
+  /* Links that are not lineage. a=from, b=to, k=kind, l=label, note=where it is written.
+     Where the kind has a direction, a is the one who acts: a mentors b, a rescued b. */
+  const BONDS = [
+    /* ---------------- before and after the Flood ---------------- */
+    { a:'cain', b:'abel', k:'harmed', l:'Killed him in the field', note:'Gen 4:8' },
+    { a:'ham', b:'noah', k:'harmed', l:'Saw his father uncovered and told his brothers outside', note:'Gen 9:22' },
+    { a:'shem', b:'japheth', k:'ally', l:'Walked in backward with a garment to cover their father', note:'Gen 9:23' },
+
+    /* ---------------- the patriarchs ---------------- */
+    { a:'abraham', b:'sarah', k:'kin', l:'Half-sister as well as wife — "the daughter of my father"', note:'Gen 20:12' },
+    { a:'hagar', b:'sarah', k:'servant', l:'Her Egyptian servant, handed to Abraham in her place', note:'Gen 16:1–3' },
+    { a:'sarah', b:'hagar', k:'harmed', l:'Dealt harshly with her until she fled into the wilderness', note:'Gen 16:6' },
+    { a:'abraham', b:'lot', k:'rescued', l:'Armed his men and brought him back from the four kings', note:'Gen 14:14–16' },
+    { a:'ishmael', b:'isaac', k:'rival', l:'Mocked him at the feast on the day he was weaned', note:'Gen 21:9; Gal 4:29' },
+    { a:'rebekah', b:'jacob', k:'ally', l:'Dressed him in Esau’s clothes and took the curse on herself', note:'Gen 27:5–17' },
+    { a:'jacob', b:'esau', k:'rival', l:'Bought his birthright for stew, then took his blessing', note:'Gen 25:29–34; Gen 27:1–29' },
+    { a:'esau', b:'jacob', k:'met', l:'Ran to meet him after twenty years and fell on his neck', note:'Gen 33:4' },
+    { a:'leah', b:'rachel', k:'kin', l:'Sisters — Jacob served seven years for each of them', note:'Gen 29:16–28' },
+    { a:'rachel', b:'leah', k:'rival', l:'Envied her sons, and traded a night for mandrakes', note:'Gen 30:1–16' },
+    { a:'bilhah', b:'rachel', k:'servant', l:'Bore Dan and Naphtali on her mistress’s knees', note:'Gen 30:3–8' },
+    { a:'zilpah', b:'leah', k:'servant', l:'Given to Jacob when her mistress stopped bearing', note:'Gen 30:9–13' },
+
+    /* ---------------- the twelve ---------------- */
+    { a:'reuben', b:'bilhah', k:'harmed', l:'Lay with his father’s concubine, and lost his birthright', note:'Gen 35:22; Gen 49:4; 1 Chr 5:1' },
+    { a:'simeon', b:'levi', k:'ally', l:'Took their swords together against Shechem for Dinah', note:'Gen 34:25–26' },
+    { a:'judah', b:'joseph', k:'harmed', l:'Proposed selling him to the Ishmaelites for twenty pieces', note:'Gen 37:26–28' },
+    { a:'reuben', b:'joseph', k:'rescued', l:'Talked them out of killing him, meaning to take him home', note:'Gen 37:21–22' },
+    { a:'joseph', b:'simeon', k:'harmed', l:'Bound him before their eyes and kept him back in Egypt', note:'Gen 42:24' },
+    { a:'judah', b:'benjamin', k:'rescued', l:'Stood surety for him, and offered to stay in his place', note:'Gen 43:9; Gen 44:33' },
+    { a:'jacob', b:'joseph', k:'covenant', l:'Made him swear to bury him with his fathers, not in Egypt', note:'Gen 47:29–31' },
+    { a:'judah', b:'tamar', k:'harmed', l:'Withheld Shelah, then owned she was the righteous one', note:'Gen 38:11, 26' },
+
+    /* ---------------- Egypt and the Exodus ---------------- */
+    { a:'moses', b:'aaron', k:'anointed', l:'Poured the oil on his head and made him high priest', note:'Lev 8:12' },
+    { a:'aaron', b:'moses', k:'ally', l:'Spoke for him before Pharaoh — "he shall be your mouth"', note:'Ex 4:14–16' },
+    { a:'miriam', b:'moses', k:'rescued', l:'Watched the basket and fetched his own mother to nurse him', note:'Ex 2:4–8' },
+    { a:'miriam', b:'moses', k:'rival', l:'Spoke against him with Aaron, and was leprous seven days', note:'Num 12:1–15' },
+
+    /* ---------------- Judah’s line ---------------- */
+    { a:'boaz', b:'ruth', k:'rescued', l:'Redeemed her when the nearer kinsman would not', note:'Ruth 4:1–10' },
+
+    /* ---------------- the kings ---------------- */
+    { a:'david', b:'bathsheba', k:'harmed', l:'Sent for her, then had her husband set where he would fall', note:'2 Sam 11:2–17' },
+    { a:'david', b:'solomon', k:'mentor', l:'Charged him at the last: "Show yourself a man"', note:'1 Kgs 2:1–4' },
+    { a:'amnon', b:'tamar_d', k:'harmed', l:'Forced his sister, then sent her out and bolted the door', note:'2 Sam 13:14–17' },
+    { a:'absalom', b:'amnon', k:'harmed', l:'Had him struck down at the sheepshearing two years after', note:'2 Sam 13:23–29' },
+    { a:'absalom', b:'tamar_d', k:'rescued', l:'Kept her in his house, and killed Amnon for what he did', note:'2 Sam 13:20–29' },
+    { a:'absalom', b:'david', k:'rival', l:'Stole the hearts of Israel and drove him out of Jerusalem', note:'2 Sam 15:6–14' },
+    { a:'rehoboam', b:'solomon', k:'other', l:'Took his father’s kingdom and lost ten tribes of it', note:'1 Kgs 12:4–19' },
+    { a:'athaliah', b:'joash', k:'harmed', l:'Destroyed the royal sons; he was hidden from her as a baby', note:'2 Kgs 11:1–3' },
+    { a:'hezekiah', b:'ahaz', k:'other', l:'Opened the temple doors his father had shut', note:'2 Chr 28:24; 2 Chr 29:3' },
+    { a:'manasseh', b:'hezekiah', k:'other', l:'Rebuilt every high place his father had broken down', note:'2 Kgs 21:3' },
+    { a:'josiah', b:'manasseh', k:'other', l:'Pulled down the altars his grandfather had built', note:'2 Kgs 23:12' },
+
+    /* ---------------- the Gospel ---------------- */
+    { a:'joseph_n', b:'jesus', k:'rescued', l:'Took him to Egypt by night, out of Herod’s reach', note:'Matt 2:13–14' },
+  ];
+
   const ERA_COLOR = {
     'Before the Flood':   'sand',
     'After the Flood':    'teal',
@@ -469,16 +550,28 @@
         ((l.from === from && l.to === to) || (type !== 'parent' && l.from === to && l.to === from)));
       if (dup) return;
       const id = U.uid('l');
-      doc.links[id] = { id, from, to, type, label: '' };
+      doc.links[id] = { id, from, to, type, kind: '', label: '', note: '' };
     };
     PEOPLE.forEach(row => {
+      if (row.par) add(row.par, row.id, 'parent');
       (row.kids || []).forEach(k => add(row.id, k, 'parent'));
       (row.sp || []).forEach(s => add(row.id, s, 'spouse'));
+    });
+
+    // A pair may stand in two relations, so a bond only clashes with its own kind.
+    BONDS.forEach(row => {
+      if (!doc.people[row.a] || !doc.people[row.b] || row.a === row.b) return;
+      const dup = Object.values(doc.links).some(l => l.type === 'other' && l.kind === row.k &&
+        ((l.from === row.a && l.to === row.b) || (l.from === row.b && l.to === row.a)));
+      if (dup) return;
+      const id = U.uid('l');
+      doc.links[id] = { id, from: row.a, to: row.b, type: 'other',
+        kind: row.k, label: row.l, note: row.note || '' };
     });
 
     doc.notes = ABOUT;
     return doc;
   }
 
-  BB.seed = { build, ABOUT, count: PEOPLE.length };
+  BB.seed = { build, ABOUT, count: PEOPLE.length, bonds: BONDS.length };
 })(window.BB);

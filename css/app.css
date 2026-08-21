@@ -502,6 +502,7 @@ mark { background: var(--accent-soft); color: var(--accent-ink); border-radius: 
   margin-bottom: 8px; display: flex; align-items: center; gap: 6px;
 }
 .insp-sect > h4 .h-act { margin-left: auto; text-transform: none; letter-spacing: 0; }
+.insp-sect > h4 .count { background: var(--bg-sunk); border-radius: 999px; padding: 0 5px; letter-spacing: 0; font-variant-numeric: tabular-nums; }
 .field { margin-bottom: 8px; }
 .field > label { display: block; font-size: 11.5px; color: var(--ink-3); margin-bottom: 3px; }
 .field-row { display: flex; gap: 7px; }
@@ -547,11 +548,33 @@ textarea { resize: vertical; min-height: 66px; line-height: 1.55; font-size: 13p
 .quick-rel { display: flex; gap: 5px; flex-wrap: wrap; margin-top: 5px; }
 .quick-rel .btn { font-size: 11.5px; height: 26px; padding: 0 8px; }
 
+/* Connections — the links that are not lineage. Each row wears its kind's hue,
+   so a dozen of them still sort themselves out at a glance. */
+.rel-bonds { display: flex; flex-direction: column; gap: 2px; }
+.rel-bond {
+  --bond: var(--c-stone); --bond-bg: var(--c-stone-bg); --bond-ink: var(--c-stone-ink);
+  gap: 5px; padding-left: 8px;
+  border-left: 2px solid var(--bond); border-radius: 3px 7px 7px 3px;
+  background: color-mix(in srgb, var(--bond) 8%, transparent);
+}
+.rel-bond:hover { background: color-mix(in srgb, var(--bond) 16%, var(--panel-2)); }
+.rel-bond .bond-main { flex: 1; min-width: 0; }
+.rel-bond .bond-head { display: flex; align-items: baseline; gap: 6px; min-width: 0; }
+.rel-bond .bond-kind {
+  flex: none; font-size: 10.5px; line-height: 1.7; padding: 0 6px; border-radius: 999px;
+  background: var(--bond-bg); color: var(--bond-ink); white-space: nowrap;
+}
+.rel-bond .bond-label { font-size: 11px; line-height: 1.4; color: var(--ink-3); overflow-wrap: anywhere; }
+.rel-bond .btn { flex: none; }
+.rel-bond .btn:focus-visible { opacity: 1; }
+.insp-sect > .bond-add { margin-top: 6px; }
+
 .path-crumbs { font-size: 11.5px; line-height: 1.7; color: var(--ink-2); }
 .path-crumbs a { color: var(--ink-2); text-decoration: none; cursor: pointer; border-bottom: 1px dotted var(--line); }
 .path-crumbs a:hover { color: var(--accent-ink); border-color: var(--accent); }
-.path-crumbs .crumb-sep { color: var(--ink-3); margin: 0 3px; }
+.path-crumbs .crumb-sep { color: var(--ink-3); }
 .stat-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+.stat-grid > .stat.wide { grid-column: 1 / -1; }
 .stat {
   background: var(--bg-sunk); border-radius: 9px; padding: 7px 9px;
 }
@@ -758,6 +781,11 @@ kbd {
   .side-tab { height: 34px; padding: 0 11px; }
   .zoomctl .btn.sm { min-height: 32px; min-width: 32px; }
   .rel-item { padding: 8px 5px 8px 7px; }
+  .rel-bond { padding: 5px 4px 5px 8px; }
+  .rel-bond .btn.icon.sm { width: 40px; min-height: 40px; }
+  .rel-bond .bond-kind { font-size: 11.5px; }
+  .rel-bond .bond-label { font-size: 12px; }
+  .insp-sect > .bond-add { height: 40px; font-size: 13px; }
   .insp-swatch { width: 24px; height: 24px; }
   .hl-item .btn { min-height: 30px; }
 
@@ -925,6 +953,8 @@ kbd {
   }
   .side-filter input, .side-filter select { height: 36px; }
   .field > label { font-size: 12px; }
+  .rel-bonds { gap: 3px; }
+  .rel-bond .bond-head { gap: 7px; }
 }
 
 /* Landscape phones are short: give the details sheet less height. */

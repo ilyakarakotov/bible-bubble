@@ -321,7 +321,29 @@
         mid: { x: (x1 + x2) / 2, y: (y1 + y2) / 2 },
       };
     }
-    // spouse / other: shortest side-to-side hop
+    if (link.type === 'other') {
+      // A bowed arc: reads as a connection rather than lineage, and stays clear
+      // of a spouse line running between the same two bubbles.
+      const p1 = U.edgeAnchor(ra, rb), p2 = U.edgeAnchor(rb, ra);
+      const dx = p2.x - p1.x, dy = p2.y - p1.y;
+      const len = Math.hypot(dx, dy) || 1;
+      const bow = Math.min(70, len * 0.18);
+      const cx = (p1.x + p2.x) / 2 - (dy / len) * bow;
+      const cy = (p1.y + p2.y) / 2 + (dx / len) * bow;
+      const geo = {
+        d: `M ${p1.x} ${p1.y} Q ${cx} ${cy} ${p2.x} ${p2.y}`,
+        mid: { x: (p1.x + 2 * cx + p2.x) / 4, y: (p1.y + 2 * cy + p2.y) / 4 },
+      };
+      if (BB.model.bondKind(link.kind).dir === 'directed') {
+        const tl = Math.hypot(p2.x - cx, p2.y - cy) || 1;
+        const ux = (p2.x - cx) / tl, uy = (p2.y - cy) / tl;
+        const bx = p2.x - ux * 9.5, by = p2.y - uy * 9.5;
+        geo.arrow = `M ${bx - uy * 4.4} ${by + ux * 4.4} L ${bx + uy * 4.4} ${by - ux * 4.4} L ${p2.x} ${p2.y} Z`;
+      }
+      return geo;
+    }
+
+    // spouse: shortest side-to-side hop
     const left = ra.x <= rb.x ? ra : rb;
     const right = left === ra ? rb : ra;
     const sameRow = Math.abs(ra.y - rb.y) < Math.max(ra.h, rb.h) * 0.8;
@@ -333,6 +355,14 @@
     }
     const p1 = U.edgeAnchor(ra, rb), p2 = U.edgeAnchor(rb, ra);
     return { d: `M ${p1.x} ${p1.y} L ${p2.x} ${p2.y}`, mid: { x: (p1.x + p2.x) / 2, y: (p1.y + p2.y) / 2 } };
+  }
+
+  /** "Elijah mentor of Elisha — took him from the plough (1 Kgs 19:19)". */
+  function bondStory(link, kind) {
+    const a = S.doc.people[link.from], b = S.doc.people[link.to];
+    const names = `${(a && a.name) || 'Someone'} ${kind.out.toLowerCase()} ${(b && b.name) || 'someone'}`;
+    const tail = [link.label, link.note].filter(Boolean).join(' · ');
+    return tail ? `${names} — ${tail}` : names;
   }
 
   function renderEdges() {
@@ -351,8 +381,12 @@
         edgesG.appendChild(g);
         edgeEls.set(id, g);
       }
-      g.setAttribute('class', 'edge type-' + link.type + (selectedLink === id ? ' is-sel' : ''));
+      const kind = link.type === 'other' ? BB.model.bondKind(link.kind) : null;
+      g.setAttribute('class', 'edge type-' + link.type +
+        (kind ? ' kind-' + kind.id : '') + (selectedLink === id ? ' is-sel' : ''));
       g.dataset.id = id; g.dataset.from = link.from; g.dataset.to = link.to; g.dataset.type = link.type;
+      if (kind) g.style.setProperty('--kind', 'var(--c-' + kind.hue + ')');
+      else g.style.removeProperty('--kind');
       const [hit, path] = g.querySelectorAll('path.edge-hit, path.edge-path');
       hit.setAttribute('d', geo.d);
       path.setAttribute('d', geo.d);
@@ -363,13 +397,23 @@
         arrow.setAttribute('d', geo.arrow);
       } else if (arrow) arrow.remove();
 
+      // On the canvas a bond wears its kind; the sentence behind it lives in the
+      // tooltip and in the inspector, where there is room to read it.
+      const caption = kind ? kind.label : link.label;
       let label = g.querySelector('.edge-label');
-      if (link.label) {
+      if (caption) {
         if (!label) { label = svgEl('text', { class: 'edge-label' }); g.appendChild(label); }
         label.setAttribute('x', geo.mid.x);
         label.setAttribute('y', geo.mid.y - 4);
-        label.textContent = link.label;
+        label.textContent = caption;
       } else if (label) label.remove();
+
+      let tip = g.querySelector('title');
+      const story = kind ? bondStory(link, kind) : '';
+      if (story) {
+        if (!tip) { tip = svgEl('title'); g.insertBefore(tip, g.firstChild); }
+        tip.textContent = story;
+      } else if (tip) tip.remove();
     });
     paintTrace();
   }

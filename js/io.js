@@ -58,7 +58,8 @@
 
     out.push('# ' + d.name, '');
     const s = L.stats(d);
-    out.push(`_${U.plural(s.people, 'person', 'people')}, ${U.plural(s.links, 'link')}, ${s.generations} generations._`, '');
+    const bonds = s.bonds ? `, ${U.plural(s.bonds, 'connection')}` : '';
+    out.push(`_${U.plural(s.people, 'person', 'people')}, ${U.plural(s.links, 'link')}${bonds}, ${s.generations} generations._`, '');
 
     const seen = new Set();
     const walk = (id, depth) => {
@@ -76,6 +77,14 @@
       out.push(line);
       if (p.refs.length) out.push(`${pad}  - _${p.refs.join(' · ')}_`);
       p.highlights.forEach(h => out.push(`${pad}  - ${h}`));
+      L.bondsOf(id, d).forEach(b => {
+        const other = d.people[b.id];
+        if (!other) return;
+        const k = BB.model.bondKind(b.kind);
+        const phrase = b.dir === 'out' ? k.out : k.in;
+        const tail = [b.label, b.note].filter(Boolean).join(' · ');
+        out.push(`${pad}  - ${phrase} **${other.name || 'Unnamed'}**${tail ? ' — ' + tail : ''}`);
+      });
       if (p.notes && p.notes.trim()) {
         p.notes.trim().split(/\n+/).forEach(n => out.push(`${pad}  - > ${n}`));
       }
@@ -107,7 +116,7 @@
     };
     const nameOf = (id) => (d.people[id] ? d.people[id].name : '');
     const head = ['name', 'aka', 'sex', 'role', 'era', 'generation', 'birth_am', 'death_am', 'age', 'approx',
-      'parents', 'spouses', 'children', 'refs', 'highlights', 'tags', 'notes'];
+      'parents', 'spouses', 'children', 'connections', 'refs', 'highlights', 'tags', 'notes'];
     const rows = [head.join(',')];
     Object.values(d.people).forEach(p => {
       rows.push([
@@ -116,6 +125,10 @@
         (idx.parents.get(p.id) || []).map(nameOf).join(' | '),
         (idx.spouses.get(p.id) || []).map(nameOf).join(' | '),
         (idx.children.get(p.id) || []).map(nameOf).join(' | '),
+        L.bondsOf(p.id, d).map(b => {
+          const k = BB.model.bondKind(b.kind);
+          return `${b.dir === 'out' ? k.out : k.in} ${nameOf(b.id)}`;
+        }).join(' | '),
         p.refs.join(' | '), p.highlights.join(' | '), p.tags.join(' | '), p.notes,
       ].map(esc).join(','));
     });

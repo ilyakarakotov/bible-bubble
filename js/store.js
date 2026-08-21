@@ -15,6 +15,51 @@
 
   const LINK_TYPES = ['parent', 'spouse', 'other'];
 
+  /* ---------- bond kinds ----------
+     Links that are not lineage. out/in are how the relation reads from each end;
+     dir 'mutual' means the arrow is meaningless. hue names a colour that already
+     exists as --c-<hue> in the stylesheet.                                      */
+  const BOND_KINDS = [
+    { id:'ally',     label:'Ally',        out:'Ally of',          in:'Ally of',          dir:'mutual',   hue:'olive' },
+    { id:'rival',    label:'Rival',       out:'Rival of',         in:'Rival of',         dir:'mutual',   hue:'clay'  },
+    { id:'mentor',   label:'Mentor',      out:'Mentor of',        in:'Taught by',        dir:'directed', hue:'sky'   },
+    { id:'prophet',  label:'Prophet to',  out:'Prophet to',       in:'Warned by',        dir:'directed', hue:'plum'  },
+    { id:'anointed', label:'Anointed',    out:'Anointed',         in:'Anointed by',      dir:'directed', hue:'sand'  },
+    { id:'servant',  label:'Servant of',  out:'Servant of',       in:'Served by',        dir:'directed', hue:'stone' },
+    { id:'covenant', label:'Covenant',    out:'In covenant with', in:'In covenant with', dir:'mutual',   hue:'teal'  },
+    { id:'kin',      label:'Kin',         out:'Kin of',           in:'Kin of',           dir:'mutual',   hue:'rose'  },
+    { id:'rescued',  label:'Rescued',     out:'Rescued',          in:'Rescued by',       dir:'directed', hue:'olive' },
+    { id:'harmed',   label:'Harmed',      out:'Harmed',           in:'Harmed by',        dir:'directed', hue:'clay'  },
+    { id:'met',      label:'Met',         out:'Met',              in:'Met',              dir:'mutual',   hue:'stone' },
+    { id:'other',    label:'Connected',   out:'Connected to',     in:'Connected to',     dir:'mutual',   hue:'stone' },
+  ];
+  const BOND_BY_ID = new Map(BOND_KINDS.map(k => [k.id, k]));
+  const BOND_FALLBACK = BOND_BY_ID.get('other');
+
+  /** The row for a bond kind. Anything unknown reads as the plain "connected" bond. */
+  function bondKind(id) {
+    return (typeof id === 'string' && BOND_BY_ID.get(id)) || BOND_FALLBACK;
+  }
+
+  /** A kind only means something on a bond; lineage links carry ''. */
+  function normalizeKind(type, kind) {
+    if (type !== 'other') return '';
+    return (typeof kind === 'string' && BOND_BY_ID.has(kind)) ? kind : 'other';
+  }
+
+  const clampText = (v, n) => String(v == null ? '' : v).slice(0, n);
+
+  /**
+   * The key two links share when they are the same relation: parent links are
+   * ordered, spouse and bond links are unordered pairs, and two bonds only clash
+   * when they are the same kind — the same pair may be both rival and kin.
+   */
+  function linkKey(from, to, type, kind) {
+    const pair = type === 'parent' ? from + '>' + to
+      : (from < to ? from + '~' + to : to + '~' + from);
+    return type + '|' + pair + (type === 'other' ? '|' + kind : '');
+  }
+
   /* ---------- shapes ---------- */
   function blankPerson(props) {
     const p = Object.assign({
@@ -123,19 +168,24 @@
     });
 
     const links = Array.isArray(raw.links) ? raw.links : Object.values(raw.links || {});
+    const seenLinks = new Set();
     links.forEach(lr => {
       if (!lr || typeof lr !== 'object') return;
       const from = String(lr.from || '');
       const to = String(lr.to || '');
       if (!d.people[from] || !d.people[to] || from === to) return;      // drop dangling links
       const type = LINK_TYPES.includes(lr.type) ? lr.type : 'parent';
-      const id = typeof lr.id === 'string' && lr.id ? lr.id : U.uid('l');
-      // collapse duplicates (and mirrored spouse links)
-      const dup = Object.values(d.links).some(x =>
-        x.type === type && ((x.from === from && x.to === to) ||
-          (type !== 'parent' && x.from === to && x.to === from)));
-      if (dup) return;
-      d.links[id] = { id, from, to, type, label: String(lr.label || '').slice(0, 60) };
+      const kind = normalizeKind(type, lr.kind);       // boards saved before bonds carry none
+      const key = linkKey(from, to, type, kind);
+      if (seenLinks.has(key)) return;                  // collapse duplicates (and mirrored spouse links)
+      seenLinks.add(key);
+      let id = typeof lr.id === 'string' && lr.id ? lr.id : U.uid('l');
+      if (d.links[id]) id = U.uid('l');                // two rows claiming one id
+      d.links[id] = {
+        id, from, to, type, kind,
+        label: clampText(lr.label, 60),
+        note: clampText(lr.note, 500),
+      };
     });
 
     const v = raw.view || {};
@@ -444,26 +494,83 @@
   }
   store.wouldCycle = wouldCycle;
 
-  store.linkExists = function (from, to, type) {
-    return Object.values(doc.links).some(l =>
-      l.type === type && ((l.from === from && l.to === to) ||
-        (type !== 'parent' && l.from === to && l.to === from)));
+  /**
+   * Is there already a link of this type between these two? `kind` is only
+   * consulted for bonds; leave it out to ask about a bond of any kind.
+   */
+  store.linkExists = function (from, to, type, kind) {
+    const wanted = (type === 'other' && kind != null && kind !== '') ? normalizeKind(type, kind) : null;
+    return Object.values(doc.links).some(l => {
+      if (l.type !== type) return false;
+      const pair = type === 'parent'
+        ? (l.from === from && l.to === to)
+        : ((l.from === from && l.to === to) || (l.from === to && l.to === from));
+      if (!pair) return false;
+      return wanted === null || normalizeKind('other', l.kind) === wanted;
+    });
   };
 
   /**
-   * Create a link. Returns {ok, link, reason}.
-   * parent: from = parent, to = child.
+   * Create a link. Returns {ok, link} or {ok:false, reason}.
+   * parent: from = parent, to = child. opts: {label, kind, note}.
    */
   store.addLink = function (from, to, type, opts) {
     type = LINK_TYPES.includes(type) ? type : 'parent';
+    const o = opts || {};
     if (!doc.people[from] || !doc.people[to]) return { ok: false, reason: 'missing' };
     if (from === to) return { ok: false, reason: 'self' };
-    if (store.linkExists(from, to, type)) return { ok: false, reason: 'duplicate' };
+    const kind = normalizeKind(type, o.kind);
+    if (store.linkExists(from, to, type, kind)) return { ok: false, reason: 'duplicate' };
     if (type === 'parent' && wouldCycle(from, to)) return { ok: false, reason: 'cycle' };
-    const link = { id: U.uid('l'), from, to, type, label: (opts && opts.label) || '' };
+    const link = {
+      id: U.uid('l'), from, to, type, kind,
+      label: clampText(o.label, 60),
+      note: clampText(o.note, 500),
+    };
     store.batch('link', () => { doc.links[link.id] = link; changed('links'); });
     store.seal();
     return { ok: true, link };
+  };
+
+  /**
+   * Edit a link in place: kind (bonds only), label, note. Returns the link, or
+   * null when the id is unknown, a kind was asked for on a lineage link, or the
+   * new kind would duplicate a bond these two already have.
+   */
+  store.updateLink = function (id, patch) {
+    const l = doc.links[id];
+    if (!l || !patch || typeof patch !== 'object') return null;
+    const next = {};
+    if ('kind' in patch) {
+      const wants = patch.kind == null ? '' : String(patch.kind);
+      if (l.type !== 'other') {
+        if (wants) return null;                      // a kind means nothing on lineage
+      } else {
+        const kind = normalizeKind('other', wants);
+        if (kind !== l.kind && store.linkExists(l.from, l.to, 'other', kind)) return null;
+        next.kind = kind;
+      }
+    }
+    if ('label' in patch) next.label = clampText(patch.label, 60);
+    if ('note' in patch) next.note = clampText(patch.note, 500);
+    const keys = Object.keys(next);
+    if (!keys.length) return l;
+    // Same label as updatePerson uses, so typing into one field is one undo step.
+    snapshot('link:' + id + ':' + keys.join(','));
+    Object.assign(l, next);
+    changed('links');
+    return l;
+  };
+
+  /** Every link joining two people, either direction, any type. */
+  store.linksBetween = function (a, b) {
+    return Object.values(doc.links).filter(l =>
+      (l.from === a && l.to === b) || (l.from === b && l.to === a));
+  };
+
+  /** Every connection — the links that are not lineage. */
+  store.bonds = function () {
+    return Object.values(doc.links).filter(l => l.type === 'other');
   };
 
   store.removeLink = function (id) {
@@ -511,5 +618,8 @@
   };
 
   BB.store = store;
-  BB.model = { blankPerson, blankDoc, normalizeDoc, normalizePerson, deriveYears, SCHEMA, LINK_TYPES };
+  BB.model = {
+    blankPerson, blankDoc, normalizeDoc, normalizePerson, deriveYears,
+    SCHEMA, LINK_TYPES, BOND_KINDS, bondKind,
+  };
 })(window.BB);

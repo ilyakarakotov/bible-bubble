@@ -131,6 +131,52 @@
     ]);
   }
 
+  /* ---------- connections ---------- */
+  /** Kind first, in the order the vocabulary lists them, then by name. */
+  function sortBonds(list) {
+    const order = new Map(BB.model.BOND_KINDS.map((k, i) => [k.id, i]));
+    const rank = (b) => (order.has(b.kind) ? order.get(b.kind) : order.size);
+    const named = (b) => { const q = S.person(b.id); return U.fold(q ? q.name : ''); };
+    return list.slice().sort((a, b) => rank(a) - rank(b) || named(a).localeCompare(named(b)));
+  }
+
+  /** One connection, read from this person's end: "Mentor of — Elisha". */
+  function bondRow(b) {
+    const q = S.person(b.id);
+    if (!q) return null;
+    const kind = BB.model.bondKind(b.kind);
+    const phrase = b.dir === 'out' ? kind.out : kind.in;
+    const who = q.name || 'this person';
+    return el('div.rel-item.rel-bond', {
+      title: 'Go to ' + who + (b.note ? ' — ' + b.note : ''),
+      style: {
+        '--bond': `var(--c-${kind.hue}, var(--c-stone))`,
+        '--bond-bg': `var(--c-${kind.hue}-bg, var(--c-stone-bg))`,
+        '--bond-ink': `var(--c-${kind.hue}-ink, var(--c-stone-ink))`,
+      },
+      onclick: (e) => {
+        if (e.target.closest('button')) return;
+        C.select([b.id]); C.focus(b.id, { zoom: 0.9 });
+      },
+    }, [
+      el('div.bond-main', {}, [
+        el('div.bond-head', {}, [
+          el('span.bond-kind', { text: phrase }),
+          el('span.rel-name', { text: q.name || 'Unnamed' }),
+        ]),
+        b.label ? el('div.bond-label', { text: b.label }) : null,
+      ]),
+      el('button.btn.icon.ghost.sm', {
+        type: 'button', title: 'Edit this connection',
+        onclick: (e) => { e.stopPropagation(); BB.app.editBond(b.linkId); },
+      }, [icon('link')]),
+      el('button.btn.icon.ghost.sm', {
+        type: 'button', title: 'Remove this connection',
+        onclick: (e) => { e.stopPropagation(); S.removeLink(b.linkId); refresh(true); },
+      }, [icon('close')]),
+    ]);
+  }
+
   /* ---------- the panel ---------- */
   function render() {
     const sel = C.selected();
@@ -148,7 +194,8 @@
     const parents = L.parentsOf(p.id);
     const kids = L.childrenOf(p.id);
     const spouses = L.spousesOf(p.id);
-    const others = L.othersOf(p.id);
+    const bonds = sortBonds(L.bondsOf(p.id));
+    const deg = L.degree(p.id);
     const gen = L.generationOf(p.id);
     const descendants = L.descendants(p.id).size;
     const path = L.pathToRoot(p.id);
@@ -299,13 +346,25 @@
           el('button.btn.sm.ghost', { type: 'button', text: 'Link existing', onclick: () => BB.app.pickPerson(p.id, 'child') }),
         ]),
       }),
-      others.length ? relGroup('Other links', others.map(o => o.id), { empty: '' }) : null,
     ]);
+
+    /* connections */
+    const connections = section('Connections', [
+      bonds.length
+        ? el('div.rel-bonds', {}, bonds.map(b => bondRow(b)).filter(Boolean))
+        : el('div.rel-none', { text: 'No connections recorded — link them to the people they met, taught, fought or followed.' }),
+      el('button.btn.mini-add.bond-add', {
+        type: 'button', text: '+ Add a connection',
+        onclick: () => BB.app.addBond(p.id),
+      }),
+    ], bonds.length ? el('span.count', { text: String(bonds.length) }) : null);
 
     /* lineage */
     const crumbs = el('div.path-crumbs');
     path.forEach((id, i) => {
-      if (i) crumbs.appendChild(el('span.crumb-sep', { text: '›' }));
+      // Spaces around the chevron: without one the whole line of descent is a
+      // single unbreakable run and a long chain scrolls the panel sideways.
+      if (i) crumbs.appendChild(el('span.crumb-sep', { text: ' › ' }));
       const q = S.person(id);
       if (id === p.id) crumbs.appendChild(el('strong', { text: q ? q.name : '?' }));
       else crumbs.appendChild(el('a', { text: q ? q.name : '?', onclick: () => { C.select([id]); C.focus(id, { zoom: 0.9 }); } }));
@@ -318,6 +377,7 @@
         el('div.stat', {}, [el('div.k', { text: 'Descendants' }), el('div.v', { text: String(descendants) })]),
         el('div.stat', {}, [el('div.k', { text: 'Children' }), el('div.v', { text: String(kids.length) })]),
         el('div.stat', {}, [el('div.k', { text: 'Age' }), el('div.v', { text: U.isNum(p.age) ? String(p.age) : '—' })]),
+        el('div.stat.wide', {}, [el('div.k', { text: 'Connections' }), el('div.v', { text: String(deg.bonds) })]),
       ]),
       el('button.btn.sm', {
         type: 'button', style: { marginTop: '9px', width: '100%', justifyContent: 'center' },
@@ -332,7 +392,7 @@
       el('button.btn.sm.danger', { type: 'button', title: 'Delete (⌫)', onclick: () => BB.app.deleteSelected() }, [icon('trash'), el('span', { text: 'Delete' })]),
     ]);
 
-    host.replaceChildren(head, el('div.insp-body', {}, [identity, years, highlights, notes, rel, lineage]), foot);
+    host.replaceChildren(head, el('div.insp-body', {}, [identity, years, highlights, notes, rel, connections, lineage]), foot);
   }
 
   function removeHighlight(p, i) {
@@ -388,7 +448,10 @@
           }))),
         ]),
         section('Actions', [
-          el('button.btn.mini-add', { type: 'button', text: 'Tidy just these into a lineage', onclick: () => BB.app.autoLayout(sel) }),
+          sel.length === 2
+            ? el('button.btn.mini-add', { type: 'button', text: 'Connect these two', onclick: () => BB.app.addBond(sel[0], sel[1]) })
+            : null,
+          el('button.btn.mini-add', { type: 'button', style: sel.length === 2 ? { marginTop: '6px' } : null, text: 'Tidy just these into a lineage', onclick: () => BB.app.autoLayout(sel) }),
           el('button.btn.mini-add', { type: 'button', style: { marginTop: '6px' }, text: 'Fit these on screen', onclick: () => C.fit(sel) }),
           el('button.btn.mini-add.danger', { type: 'button', style: { marginTop: '6px' }, text: 'Delete ' + U.plural(sel.length, 'person', 'people'), onclick: () => BB.app.deleteSelected() }),
         ]),

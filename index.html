@@ -8,6 +8,7 @@
 <meta name="color-scheme" content="light dark">
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Ccircle cx='11' cy='11' r='7' fill='%23c8963e'/%3E%3Ccircle cx='22' cy='22' r='5' fill='%237a9e7e'/%3E%3Cpath d='M14 15 L19 20' stroke='%23c8963e' stroke-width='2'/%3E%3C/svg%3E">
 <link rel="stylesheet" href="css/app.css">
+<link rel="stylesheet" href="css/web.css">
 </head>
 <body>
 
@@ -35,6 +36,7 @@
   <symbol id="i-target" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8"/><circle cx="12" cy="12" r="3"/><path d="M12 1v3M12 20v3M1 12h3M20 12h3"/></symbol>
   <symbol id="i-copy" viewBox="0 0 24 24"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15H4.5A1.5 1.5 0 0 1 3 13.5v-9A1.5 1.5 0 0 1 4.5 3h9A1.5 1.5 0 0 1 15 4.5V5"/></symbol>
   <symbol id="i-link" viewBox="0 0 24 24"><path d="M10 14a4 4 0 0 0 5.7 0l3-3a4 4 0 0 0-5.7-5.7L11.5 6.8"/><path d="M14 10a4 4 0 0 0-5.7 0l-3 3a4 4 0 0 0 5.7 5.7l1.5-1.5"/></symbol>
+  <symbol id="i-web" viewBox="0 0 24 24"><circle cx="12" cy="12" r="2.6"/><circle cx="5" cy="6" r="2"/><circle cx="19" cy="7" r="2"/><circle cx="16.5" cy="19" r="2"/><path d="M6.6 7.4l3.6 3.1M14.4 11.1l3-2.6M13.5 13.9l2.2 3.3"/></symbol>
   <symbol id="i-grid" viewBox="0 0 24 24"><path d="M3 9h18M3 15h18M9 3v18M15 3v18"/></symbol>
 </defs></svg>
 
@@ -60,6 +62,7 @@
 
     <nav class="viewtabs" role="tablist">
       <button class="tab is-active" data-view="canvas" role="tab"><svg><use href="#i-canvas"/></svg><span>Canvas</span></button>
+      <button class="tab" data-view="web" role="tab" title="Web of connections"><svg><use href="#i-web"/></svg><span>Web</span></button>
       <button class="tab" data-view="timeline" role="tab"><svg><use href="#i-timeline"/></svg><span>Timeline</span></button>
     </nav>
 
@@ -182,6 +185,69 @@
         <div class="tl-undated" id="tl-undated"></div>
       </div>
 
+
+      <div class="web" id="web">
+        <div class="web-toolbar">
+          <div class="web-modes">
+            <button class="chip is-active" data-webshow="all">All links</button>
+            <button class="chip" data-webshow="lineage">Lineage</button>
+            <button class="chip" data-webshow="bonds">Connections</button>
+          </div>
+          <label class="tl-field">
+            <span>Colour</span>
+            <select id="web-color">
+              <option value="era">Era</option>
+              <option value="generation">Generation</option>
+              <option value="bubble">Bubble colour</option>
+              <option value="degree">Connection count</option>
+            </select>
+          </label>
+          <label class="tl-field">
+            <span>Labels</span>
+            <select id="web-labels">
+              <option value="hubs">Hubs</option>
+              <option value="all">Everyone</option>
+              <option value="none">On hover</option>
+            </select>
+          </label>
+          <label class="tl-field">
+            <span>Spread</span>
+            <input type="range" id="web-spread" min="40" max="260" step="10" value="120">
+          </label>
+          <label class="tl-toggle"><input type="checkbox" id="web-isolated" checked><span>Show unlinked</span></label>
+          <div class="tl-spacer"></div>
+          <button class="btn sm ghost" id="web-side-btn" aria-expanded="true">Panel</button>
+          <div class="tl-zoom">
+            <button class="btn icon ghost sm" data-act="web-zoom-out" title="Zoom out">&minus;</button>
+            <button class="btn ghost sm" data-act="web-fit" title="Fit the web to the screen">Fit</button>
+            <button class="btn icon ghost sm" data-act="web-zoom-in" title="Zoom in">+</button>
+          </div>
+        </div>
+        <div class="web-body">
+          <div class="web-stage" id="web-stage">
+            <canvas id="web-canvas"></canvas>
+            <div class="web-tip" id="web-tip" hidden></div>
+            <div class="web-empty" id="web-empty" hidden>
+              <p>Nobody on this board yet. Add a few people and their links will show up here as a web.</p>
+            </div>
+          </div>
+          <aside class="web-side" id="web-side">
+            <div class="web-panel">
+              <h3>How far apart</h3>
+              <div class="web-pair">
+                <select id="web-path-a" aria-label="From"></select>
+                <select id="web-path-b" aria-label="To"></select>
+              </div>
+              <div class="web-path-out" id="web-path-out"></div>
+            </div>
+            <div class="web-panel">
+              <h3>Most connected</h3>
+              <div class="web-rank" id="web-rank"></div>
+            </div>
+          </aside>
+        </div>
+      </div>
+
     </section>
 
     <aside class="inspector" id="inspector" hidden></aside>
@@ -191,6 +257,7 @@
   <nav class="mobilebar" id="mobilebar" aria-label="Main navigation">
     <button class="mb-item" data-mb="lineage" aria-label="Lineage panel"><svg><use href="#i-trace"/></svg><span>Lineage</span></button>
     <button class="mb-item is-active" data-mb="canvas" aria-label="Canvas"><svg><use href="#i-canvas"/></svg><span>Canvas</span></button>
+    <button class="mb-item" data-mb="web" aria-label="Web of connections"><svg><use href="#i-web"/></svg><span>Web</span></button>
     <button class="mb-item" data-mb="timeline" aria-label="Timeline"><svg><use href="#i-timeline"/></svg><span>Timeline</span></button>
     <button class="mb-item" data-mb="details" aria-label="Details panel"><svg><use href="#i-people"/></svg><span id="mb-details-label">Details</span></button>
   </nav>
@@ -221,6 +288,7 @@
 <script src="js/timeline.js"></script>
 <script src="js/sidebar.js"></script>
 <script src="js/io.js"></script>
+<script src="js/web.js"></script>
 <script src="js/app.js"></script>
 </body>
 </html>

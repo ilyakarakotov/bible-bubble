@@ -31,8 +31,11 @@
     const app = $('#app');
     app.classList.toggle('view-canvas', v === 'canvas');
     app.classList.toggle('view-timeline', v === 'timeline');
+    app.classList.toggle('view-web', v === 'web');
     $$('.viewtabs .tab').forEach(t => t.classList.toggle('is-active', t.dataset.view === v));
-    if (v === 'timeline') { BB.timeline.show(); } else { BB.timeline.hide(); C.render(); }
+    if (v === 'timeline') BB.timeline.show(); else BB.timeline.hide();
+    if (v === 'web') BB.web.show(); else BB.web.hide();
+    if (v === 'canvas') C.render();
     S.setPref('view', v);
     paintMobileBar();
   }
@@ -183,6 +186,7 @@
     C.select([id]);
     if (isPhone()) closePanels();
     if (currentView === 'canvas') C.focus(id, { zoom: 0.95 });
+    else if (currentView === 'web') BB.web.focus(id);
     else BB.timeline.draw();
   }
   function showOnCanvas(id) {
@@ -232,6 +236,8 @@
       { label: 'Add a spouse', icon: 'link', run: () => quickRelative(id, 'spouse') },
       '-',
       { label: 'Link to an existing person…', icon: 'link', run: () => pickPerson(id, 'child') },
+      { label: multi && C.selection.size === 2 ? 'Connect these two…' : 'Connect to someone…', icon: 'web',
+        run: () => { const two = [...C.selection]; addBond(id, multi && two.length === 2 ? two.find(x => x !== id) : null); } },
       { label: C.trace && C.trace.id === id ? 'Stop tracing' : 'Trace this line', icon: 'trace', key: 'T', run: () => toggleTrace(id) },
       { label: 'Centre on this person', icon: 'target', run: () => C.focus(id, { zoom: 0.95 }) },
       { label: 'Duplicate', icon: 'copy', key: '⌘D', run: () => duplicatePerson(id) },
@@ -256,25 +262,29 @@
     const link = S.doc.links[linkId];
     if (!link) return;
     const a = S.person(link.from), b = S.person(link.to);
-    const label = { parent: 'Parent → child', spouse: 'Spouse', other: 'Other' }[link.type];
+    const label = link.type === 'other' ? BB.model.bondKind(link.kind).label
+      : { parent: 'Parent → child', spouse: 'Spouse' }[link.type];
     menu(x, y, [
       { head: `${(a && a.name) || '?'} → ${(b && b.name) || '?'} · ${label}` },
+      link.type === 'other'
+        ? { label: 'Edit this connection…', icon: 'web', run: () => editBond(linkId) }
+        : { label: 'Make it a connection…', icon: 'web', run: () => retype(linkId, 'other', true) },
       { label: 'Make it a spouse link', disabled: link.type === 'spouse', run: () => retype(linkId, 'spouse') },
       { label: 'Make it a parent link', disabled: link.type === 'parent', run: () => retype(linkId, 'parent') },
-      { label: 'Make it another kind of link', disabled: link.type === 'other', run: () => retype(linkId, 'other') },
       '-',
       { label: 'Reverse the direction', run: () => reverse(linkId) },
       { label: 'Delete this link', icon: 'trash', danger: true, run: () => { S.removeLink(linkId); U.toast('Link removed', { action: 'Undo', onAction: () => S.undo() }); } },
     ]);
   }
 
-  function retype(linkId, type) {
+  function retype(linkId, type, thenEdit) {
     const link = S.doc.links[linkId];
     if (!link) return;
-    const { from, to } = link;
+    const { from, to, label } = link;
     S.removeLink(linkId);
-    const res = S.addLink(from, to, type);
-    if (!res.ok) { S.undo(); U.toast(linkError(res.reason)); }
+    const res = S.addLink(from, to, type, { label });
+    if (!res.ok) { S.undo(); U.toast(linkError(res.reason)); return; }
+    if (thenEdit) editBond(res.link.id);
   }
   function reverse(linkId) {
     const link = S.doc.links[linkId];
@@ -394,7 +404,7 @@
         ['T', 'Trace the selected line'],
         ['G', 'Toggle the grid'],
         ['/', 'Jump to search'],
-        ['1 / 2', 'Canvas / timeline'],
+        ['1 / 2 / 3', 'Canvas / web / timeline'],
         ['+ −', 'Zoom in and out'],
         ['0', 'Back to the head of the line'],
         ['Arrows', 'Nudge the selection'],
@@ -522,6 +532,171 @@
     paint();
   }
 
+  /* ================= connections ================= */
+
+  /** Chips for the relation kinds; the caller gets the id of whichever is picked. */
+  function kindChips(current, onPick) {
+    const row = el('div.kind-chips');
+    BB.model.BOND_KINDS.forEach(k => {
+      row.appendChild(el('button.chip', {
+        type: 'button', text: k.label, title: k.out,
+        dataset: { kind: k.id },
+        style: { '--kind': `var(--c-${k.hue})` },
+        onclick: () => {
+          $$('button', row).forEach(c => c.classList.toggle('is-active', c.dataset.kind === k.id));
+          onPick(k.id);
+        },
+      }));
+    });
+    $$('button', row).forEach(c => c.classList.toggle('is-active', c.dataset.kind === current));
+    return row;
+  }
+
+  /** "Elijah — mentor of — Elisha", rebuilt whenever the ends or the kind change. */
+  function bondSentence(host, fromId, toId, kind) {
+    const a = S.person(fromId), b = S.person(toId);
+    host.replaceChildren(
+      el('strong', { text: (a && a.name) || 'Unnamed' }),
+      el('em', { text: BB.model.bondKind(kind).out.toLowerCase() }),
+      el('strong', { text: (b && b.name) || 'Unnamed' }),
+    );
+  }
+
+  const bondError = (reason) => reason === 'duplicate'
+    ? 'Those two already have that connection.' : linkError(reason);
+
+  /**
+   * Record a link that is not lineage. `otherId` pre-fills the far end, which is
+   * how "connect these two" works from a two-person selection.
+   */
+  function addBond(anchorId, otherId) {
+    const anchor = S.person(anchorId);
+    if (!anchor) return;
+    if (S.count() < 2) { U.toast('A connection needs two people — add somebody else first.'); return; }
+
+    let target = S.person(otherId) ? otherId : null;
+    let kind = 'other';
+    let flipped = false;                       // which end of a directed relation the anchor is on
+
+    const search = el('input', { type: 'search', placeholder: 'Search people…', autocomplete: 'off' });
+    const list = el('div.picker-list');
+    const label = el('input.bond-label', { type: 'text', maxlength: '60', placeholder: 'What happened between them?' });
+    const note = el('input.bond-note', { type: 'text', maxlength: '500', placeholder: 'Reference — Gen 4:8' });
+    const sentence = el('div.bond-sentence');
+    const swap = el('button.btn.sm.ghost', { type: 'button', text: 'Swap ends', onclick: () => { flipped = !flipped; paintSentence(); } });
+    const save = el('button.btn.primary', { type: 'button', text: 'Connect', onclick: () => commit() });
+
+    const ends = () => (flipped ? { from: target, to: anchorId } : { from: anchorId, to: target });
+
+    function paintSentence() {
+      if (!target) sentence.replaceChildren(el('span.bond-hint', { text: 'Pick who to connect them to.' }));
+      else { const e = ends(); bondSentence(sentence, e.from, e.to, kind); }
+      swap.hidden = !target || BB.model.bondKind(kind).dir !== 'directed';
+      save.disabled = !target;
+    }
+
+    function paintList() {
+      const f = U.fold(search.value.trim());
+      const items = S.people()
+        .filter(p => p.id !== anchorId)
+        .filter(p => !f || U.fold(p.name).includes(f) || p.aka.some(a => U.fold(a).includes(f)) || U.fold(p.role).includes(f))
+        .sort((a, b) => (a.name || '').localeCompare(b.name || ''))
+        .slice(0, 200);
+      list.replaceChildren(...(items.length ? items.map(p => el('div.picker-item' + (p.id === target ? '.is-active' : ''), {
+        onclick: () => { target = p.id; paintList(); paintSentence(); label.focus(); },
+      }, [
+        el('span.tree-dot', { style: { background: `var(--c-${U.colorOf(p.color)})` } }),
+        el('span.rel-name', { text: p.name || 'Unnamed' }),
+        el('span.rel-meta', { text: p.role || p.era || '' }),
+      ])) : [el('div.sr-empty', { text: 'Nobody matches that.' })]));
+    }
+
+    function commit() {
+      if (!target) return;
+      const e = ends();
+      const res = S.addLink(e.from, e.to, 'other', { kind, label: label.value.trim(), note: note.value.trim() });
+      if (!res.ok) { U.toast(bondError(res.reason)); return; }
+      close();
+      BB.inspector.refresh(true);
+      U.toast('Connected');
+    }
+
+    search.addEventListener('input', paintList);
+    label.addEventListener('keydown', (e) => { if (e.key === 'Enter') commit(); });
+
+    const close = modal('Connect ' + (anchor.name || 'this person'), [
+      search,
+      list,
+      el('div.rel-label', { text: 'How are they connected?' }),
+      kindChips(kind, (k) => { kind = k; paintSentence(); }),
+      el('div.bond-row', {}, [sentence, swap]),
+      label,
+      note,
+    ], [
+      el('button.btn', { type: 'button', text: 'Cancel', onclick: () => close() }),
+      save,
+    ], { onOpen: () => (target ? label : search).focus() });
+
+    paintList();
+    paintSentence();
+  }
+
+  /** Change the kind, wording or direction of a connection that already exists. */
+  function editBond(linkId) {
+    let id = linkId;
+    const link = S.doc.links[id];
+    if (!link || link.type !== 'other') return;
+    let kind = link.kind || 'other';
+
+    const label = el('input.bond-label', { type: 'text', maxlength: '60', value: link.label || '', placeholder: 'What happened between them?' });
+    const note = el('input.bond-note', { type: 'text', maxlength: '500', value: link.note || '', placeholder: 'Reference — Gen 4:8' });
+    const sentence = el('div.bond-sentence');
+
+    function paint() {
+      const cur = S.doc.links[id];
+      if (!cur) return;
+      bondSentence(sentence, cur.from, cur.to, kind);
+    }
+
+    /* Reversing means a new link, so keep hold of the id it comes back with. */
+    function swapEnds() {
+      const cur = S.doc.links[id];
+      if (!cur) return;
+      S.removeLink(id);
+      const res = S.addLink(cur.to, cur.from, 'other', { kind: cur.kind, label: cur.label, note: cur.note });
+      if (!res.ok) { S.undo(); U.toast(bondError(res.reason)); return; }
+      id = res.link.id;
+      paint();
+    }
+
+    function commit() {
+      const ok = S.updateLink(id, { kind, label: label.value.trim(), note: note.value.trim() });
+      if (!ok) { U.toast('Those two already have that connection.'); return; }
+      close();
+      BB.inspector.refresh(true);
+    }
+
+    label.addEventListener('keydown', (e) => { if (e.key === 'Enter') commit(); });
+
+    const close = modal('Edit this connection', [
+      el('div.bond-row', {}, [sentence, el('button.btn.sm.ghost', { type: 'button', text: 'Swap ends', onclick: swapEnds })]),
+      el('div.rel-label', { text: 'How are they connected?' }),
+      kindChips(kind, (k) => { kind = k; paint(); }),
+      label,
+      note,
+    ], [
+      el('button.btn.danger', { type: 'button', text: 'Remove', onclick: () => {
+        S.removeLink(id); close(); BB.inspector.refresh(true);
+        U.toast('Connection removed', { action: 'Undo', onAction: () => S.undo() });
+      } }),
+      el('span.foot-spacer'),
+      el('button.btn', { type: 'button', text: 'Cancel', onclick: () => close() }),
+      el('button.btn.primary', { type: 'button', text: 'Save', onclick: commit }),
+    ], { onOpen: () => label.focus() });
+
+    paint();
+  }
+
   /* ================= boards ================= */
   function refreshBoards() {
     const sel = $('#board-select');
@@ -612,6 +787,20 @@
     const box = $('#search-results');
     let results = [], active = 0;
 
+    /* Connections are searchable too, so "covenant" or "rival" finds people. */
+    let bondCache = { rev: -1, map: new Map() };
+    const bondText = (id) => {
+      if (bondCache.rev !== S.rev) bondCache = { rev: S.rev, map: new Map() };
+      if (!bondCache.map.has(id)) {
+        bondCache.map.set(id, U.fold(L.bondsOf(id).map(b => {
+          const k = BB.model.bondKind(b.kind);
+          const other = S.person(b.id);
+          return [k.label, k.out, b.label, b.note, other && other.name].filter(Boolean).join(' ');
+        }).join(' ')));
+      }
+      return bondCache.map.get(id);
+    };
+
     const score = (p, f) => {
       const name = U.fold(p.name);
       if (name === f) return 100;
@@ -622,6 +811,7 @@
       if (p.refs.some(r => U.fold(r).includes(f))) return 34;
       if (p.tags.some(t => U.fold(t).includes(f)) || U.fold(p.era).includes(f)) return 30;
       if (p.highlights.some(h => U.fold(h).includes(f))) return 22;
+      if (bondText(p.id).includes(f)) return 20;
       if (U.fold(p.notes).includes(f)) return 18;
       return 0;
     };
@@ -727,7 +917,8 @@
         else if (C.trace) C.setTrace(null);
       }
       else if (k === '1') setView('canvas');
-      else if (k === '2') setView('timeline');
+      else if (k === '2') setView('web');
+      else if (k === '3') setView('timeline');
       else if (k === '+' || k === '=') C.zoomAt(1.25);
       else if (k === '-' || k === '_') C.zoomAt(1 / 1.25);
       else if (k === '0') C.home();
@@ -788,6 +979,7 @@
       lineage: app.classList.contains('panel-lineage'),
       details: app.classList.contains('panel-details'),
       canvas: currentView === 'canvas',
+      web: currentView === 'web',
       timeline: currentView === 'timeline',
     };
     $$('.mb-item').forEach(b => b.classList.toggle('is-active', !!state[b.dataset.mb]));
@@ -810,7 +1002,7 @@
   function initMobile() {
     $$('.mb-item').forEach(b => b.addEventListener('click', () => {
       const which = b.dataset.mb;
-      if (which === 'canvas' || which === 'timeline') { closePanels(); setView(which); }
+      if (which === 'canvas' || which === 'web' || which === 'timeline') { closePanels(); setView(which); }
       else setPanel(which, !$('#app').classList.contains('panel-' + which));
     }));
     $('#sheet-backdrop').addEventListener('click', closePanels);
@@ -847,6 +1039,7 @@
     BB.io.init();
     BB.inspector.init();
     BB.timeline.init();
+    BB.web.init();
     BB.sidebar.init();
 
     applyDensity();
@@ -879,6 +1072,9 @@
         'load-seed': confirmSeed,
         'search-open': () => toggleSearch(true),
         'search-close': () => toggleSearch(false),
+        'web-zoom-in': () => BB.web.zoomBy(1.25),
+        'web-zoom-out': () => BB.web.zoomBy(1 / 1.25),
+        'web-fit': () => BB.web.fit(),
       }[act];
       if (run) { e.preventDefault(); run(); }
     });
@@ -936,8 +1132,9 @@
     /* status bar */
     const paintStatus = () => {
       const st = L.stats(S.doc);
+      const bonds = st.bonds ? ` · ${U.plural(st.bonds, 'connection')}` : '';
       $('#status-count').textContent =
-        `${U.plural(st.people, 'person', 'people')} · ${U.plural(st.links, 'link')} · ${st.generations} generations`;
+        `${U.plural(st.people, 'person', 'people')} · ${U.plural(st.links, 'link')}${bonds} · ${st.generations} generations`;
     };
     S.on('change', paintStatus);
     S.on('dirty', (d) => {
@@ -957,7 +1154,7 @@
     document.addEventListener('visibilitychange', () => { if (document.hidden) S.flush(); });
 
     const savedView = S.prefs().view;
-    if (savedView === 'timeline') setView('timeline'); else setView('canvas');
+    setView(savedView === 'timeline' || savedView === 'web' ? savedView : 'canvas');
 
     if (loaded.fresh) {
       S.createBoard('My lineage');
@@ -973,7 +1170,7 @@
   BB.app = {
     init, quickRelative, pickPerson, duplicatePerson, deleteSelected, autoLayout,
     toggleTrace, revealPerson, showOnCanvas, setView, helpModal, confirmSeed,
-    isPhone, setPanel, closePanels,
+    addBond, editBond, isPhone, setPanel, closePanels,
   };
 
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init);
