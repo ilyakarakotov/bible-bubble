@@ -1,0 +1,215 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<title>Bible Bubble — lineage canvas</title>
+<meta name="description" content="An infinite canvas for mapping Bible lineages: bubbles for people, links for who came from who, and one giant timeline.">
+<meta name="color-scheme" content="light dark">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Ccircle cx='11' cy='11' r='7' fill='%23c8963e'/%3E%3Ccircle cx='22' cy='22' r='5' fill='%237a9e7e'/%3E%3Cpath d='M14 15 L19 20' stroke='%23c8963e' stroke-width='2'/%3E%3C/svg%3E">
+<link rel="stylesheet" href="css/app.css">
+</head>
+<body>
+
+<svg class="sprite" aria-hidden="true"><defs>
+  <symbol id="i-plus" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></symbol>
+  <symbol id="i-search" viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.6-3.6"/></symbol>
+  <symbol id="i-layout" viewBox="0 0 24 24"><rect x="9" y="3" width="6" height="5" rx="1.5"/><rect x="2" y="16" width="6" height="5" rx="1.5"/><rect x="16" y="16" width="6" height="5" rx="1.5"/><path d="M12 8v4M5 16v-2h14v2"/></symbol>
+  <symbol id="i-fit" viewBox="0 0 24 24"><path d="M4 9V5.5A1.5 1.5 0 0 1 5.5 4H9M15 4h3.5A1.5 1.5 0 0 1 20 5.5V9M20 15v3.5a1.5 1.5 0 0 1-1.5 1.5H15M9 20H5.5A1.5 1.5 0 0 1 4 18.5V15"/></symbol>
+  <symbol id="i-trace" viewBox="0 0 24 24"><circle cx="12" cy="5" r="2.5"/><circle cx="6" cy="19" r="2.5"/><circle cx="18" cy="19" r="2.5"/><path d="M12 7.5v4M12 11.5H6.5a.5.5 0 0 0-.5.5v4.5M12 11.5h5.5a.5.5 0 0 1 .5.5v4.5"/></symbol>
+  <symbol id="i-canvas" viewBox="0 0 24 24"><circle cx="8" cy="9" r="4"/><circle cx="17" cy="16" r="3"/><path d="M11.2 11.6l3.2 2.6"/></symbol>
+  <symbol id="i-timeline" viewBox="0 0 24 24"><path d="M3 6h12M3 12h18M3 18h9"/><circle cx="18" cy="6" r="2"/><circle cx="15" cy="18" r="2"/></symbol>
+  <symbol id="i-download" viewBox="0 0 24 24"><path d="M12 4v11M7.5 10.5L12 15l4.5-4.5M4 19h16"/></symbol>
+  <symbol id="i-upload" viewBox="0 0 24 24"><path d="M12 16V5M7.5 9.5L12 5l4.5 4.5M4 19h16"/></symbol>
+  <symbol id="i-sun" viewBox="0 0 24 24"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M2 12h2M20 12h2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M19.1 4.9l-1.4 1.4M6.3 17.7l-1.4 1.4"/></symbol>
+  <symbol id="i-moon" viewBox="0 0 24 24"><path d="M20 14.5A8.5 8.5 0 0 1 9.5 4a8.5 8.5 0 1 0 10.5 10.5z"/></symbol>
+  <symbol id="i-help" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M9.5 9.5a2.5 2.5 0 1 1 3.2 2.4c-.6.2-.7.7-.7 1.3v.4"/><path d="M12 17h.01" stroke-width="2.2"/></symbol>
+  <symbol id="i-close" viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></symbol>
+  <symbol id="i-trash" viewBox="0 0 24 24"><path d="M4 7h16M9 7V5.5A1.5 1.5 0 0 1 10.5 4h3A1.5 1.5 0 0 1 15 5.5V7M6.5 7l.8 12.1A1.5 1.5 0 0 0 8.8 20.5h6.4a1.5 1.5 0 0 0 1.5-1.4L17.5 7"/></symbol>
+  <symbol id="i-undo" viewBox="0 0 24 24"><path d="M4 9h10a5 5 0 0 1 0 10h-4M4 9l4-4M4 9l4 4"/></symbol>
+  <symbol id="i-redo" viewBox="0 0 24 24"><path d="M20 9H10a5 5 0 0 0 0 10h4M20 9l-4-4M20 9l-4 4"/></symbol>
+  <symbol id="i-chev" viewBox="0 0 24 24"><path d="M9 5l7 7-7 7"/></symbol>
+  <symbol id="i-menu" viewBox="0 0 24 24"><path d="M4 7h16M4 12h16M4 17h16"/></symbol>
+  <symbol id="i-book" viewBox="0 0 24 24"><path d="M4 5.5A1.5 1.5 0 0 1 5.5 4H10a2 2 0 0 1 2 2v13a2 2 0 0 0-2-2H5.5A1.5 1.5 0 0 1 4 15.5z"/><path d="M20 5.5A1.5 1.5 0 0 0 18.5 4H14a2 2 0 0 0-2 2v13a2 2 0 0 1 2-2h4.5a1.5 1.5 0 0 0 1.5-1.5z"/></symbol>
+  <symbol id="i-people" viewBox="0 0 24 24"><circle cx="9" cy="8" r="3.2"/><path d="M3.5 19.5c0-3 2.5-5 5.5-5s5.5 2 5.5 5"/><path d="M16 5.4a3.2 3.2 0 0 1 0 5.9M17.5 14.9c2 .7 3.4 2.4 3.4 4.6"/></symbol>
+  <symbol id="i-target" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8"/><circle cx="12" cy="12" r="3"/><path d="M12 1v3M12 20v3M1 12h3M20 12h3"/></symbol>
+  <symbol id="i-copy" viewBox="0 0 24 24"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15H4.5A1.5 1.5 0 0 1 3 13.5v-9A1.5 1.5 0 0 1 4.5 3h9A1.5 1.5 0 0 1 15 4.5V5"/></symbol>
+  <symbol id="i-link" viewBox="0 0 24 24"><path d="M10 14a4 4 0 0 0 5.7 0l3-3a4 4 0 0 0-5.7-5.7L11.5 6.8"/><path d="M14 10a4 4 0 0 0-5.7 0l-3 3a4 4 0 0 0 5.7 5.7l1.5-1.5"/></symbol>
+  <symbol id="i-grid" viewBox="0 0 24 24"><path d="M3 9h18M3 15h18M9 3v18M15 3v18"/></symbol>
+</defs></svg>
+
+<div id="app" class="view-canvas">
+
+  <header class="topbar">
+    <div class="brand" title="Bible Bubble">
+      <span class="brand-mark"><i class="dot d1"></i><i class="dot d2"></i></span>
+      <span class="brand-name">Bible&nbsp;Bubble</span>
+    </div>
+
+    <div class="board-picker">
+      <select id="board-select" aria-label="Board"></select>
+      <button class="btn icon ghost" id="board-menu-btn" title="Board options" aria-label="Board options"><svg><use href="#i-chev"/></svg></button>
+    </div>
+
+    <div class="search-wrap">
+      <svg class="search-icon"><use href="#i-search"/></svg>
+      <input id="search-input" type="search" placeholder="Search people, notes, references…  (/)" autocomplete="off" spellcheck="false">
+      <div id="search-results" class="search-results" hidden></div>
+    </div>
+
+    <nav class="viewtabs" role="tablist">
+      <button class="tab is-active" data-view="canvas" role="tab"><svg><use href="#i-canvas"/></svg><span>Canvas</span></button>
+      <button class="tab" data-view="timeline" role="tab"><svg><use href="#i-timeline"/></svg><span>Timeline</span></button>
+    </nav>
+
+    <div class="actions">
+      <button class="btn icon ghost" data-act="undo" title="Undo (⌘Z)"><svg><use href="#i-undo"/></svg></button>
+      <button class="btn icon ghost" data-act="redo" title="Redo (⇧⌘Z)"><svg><use href="#i-redo"/></svg></button>
+      <span class="sep"></span>
+      <button class="btn primary" data-act="add-person" title="Add a person (N)"><svg><use href="#i-plus"/></svg><span>Person</span></button>
+      <button class="btn icon ghost" data-act="layout" title="Tidy lineage layout (L)"><svg><use href="#i-layout"/></svg></button>
+      <button class="btn icon ghost" data-act="fit" title="Fit to screen (F)"><svg><use href="#i-fit"/></svg></button>
+      <button class="btn icon ghost" data-act="theme" title="Toggle theme"><svg class="ico-sun"><use href="#i-sun"/></svg><svg class="ico-moon"><use href="#i-moon"/></svg></button>
+      <button class="btn icon ghost" data-act="more" id="more-btn" title="More"><svg><use href="#i-menu"/></svg></button>
+    </div>
+  </header>
+
+  <main class="workspace">
+
+    <aside class="sidebar" id="sidebar">
+      <div class="side-head">
+        <div class="side-tabs">
+          <button class="side-tab is-active" data-side="outline"><svg><use href="#i-trace"/></svg>Lineage</button>
+          <button class="side-tab" data-side="list"><svg><use href="#i-people"/></svg>People</button>
+        </div>
+        <button class="btn icon ghost sm" data-act="toggle-sidebar" title="Hide panel"><svg><use href="#i-close"/></svg></button>
+      </div>
+      <div class="side-filter">
+        <input id="side-filter-input" type="search" placeholder="Filter…" autocomplete="off">
+        <select id="side-sort" aria-label="Sort people">
+          <option value="lineage">Lineage order</option>
+          <option value="name">Name (A–Z)</option>
+          <option value="birth">Born (earliest)</option>
+          <option value="age">Age (longest)</option>
+          <option value="recent">Recently edited</option>
+        </select>
+      </div>
+      <div class="side-body" id="side-body"></div>
+      <div class="side-foot" id="side-foot"></div>
+    </aside>
+    <button class="sidebar-reveal" data-act="toggle-sidebar" title="Show panel"><svg><use href="#i-chev"/></svg></button>
+
+    <section class="stage" id="stage">
+
+      <div class="viewport" id="viewport" tabindex="0">
+        <div class="world" id="world">
+          <svg class="edges" id="edges"><g id="edges-g"></g></svg>
+          <div class="nodes" id="nodes"></div>
+        </div>
+        <div class="marquee" id="marquee" hidden></div>
+        <svg class="draft-link" id="draft-link" hidden><path id="draft-path"/></svg>
+        <div class="empty-state" id="empty-state" hidden>
+          <svg><use href="#i-canvas"/></svg>
+          <h2>An empty canvas</h2>
+          <p>Double-click anywhere to make your first bubble — or load the Genesis&nbsp;→&nbsp;Gospel lineage to start from Adam.</p>
+          <div class="empty-actions">
+            <button class="btn primary" data-act="add-person">Add a person</button>
+            <button class="btn" data-act="load-seed">Load starter lineage</button>
+          </div>
+        </div>
+
+        <div class="canvas-hud">
+          <div class="zoomctl">
+            <button class="btn icon ghost sm" data-act="zoom-out" title="Zoom out (−)">&minus;</button>
+            <button class="btn ghost sm zoom-label" data-act="zoom-reset" title="Reset zoom (0)">100%</button>
+            <button class="btn icon ghost sm" data-act="zoom-in" title="Zoom in (+)">+</button>
+            <span class="sep v"></span>
+            <button class="btn icon ghost sm" data-act="toggle-grid" title="Toggle grid (G)"><svg><use href="#i-grid"/></svg></button>
+            <button class="btn icon ghost sm" data-act="help" title="Keyboard shortcuts (?)"><svg><use href="#i-help"/></svg></button>
+          </div>
+          <div class="minimap" id="minimap" title="Minimap — click to jump">
+            <canvas id="minimap-canvas" width="220" height="150"></canvas>
+            <div class="minimap-view" id="minimap-view"></div>
+          </div>
+        </div>
+
+        <div class="trace-bar" id="trace-bar" hidden>
+          <span class="trace-label">Tracing lineage of</span>
+          <strong id="trace-name">—</strong>
+          <span class="trace-stats" id="trace-stats"></span>
+          <button class="btn sm ghost" data-act="trace-off">Clear</button>
+        </div>
+      </div>
+
+      <div class="timeline" id="timeline">
+        <div class="tl-toolbar">
+          <div class="tl-modes">
+            <button class="chip is-active" data-tlmode="years">By year</button>
+            <button class="chip" data-tlmode="generations">By generation</button>
+          </div>
+          <label class="tl-field">
+            <span>Colour</span>
+            <select id="tl-color">
+              <option value="era">Era</option>
+              <option value="generation">Generation</option>
+              <option value="bubble">Bubble colour</option>
+              <option value="sex">Male / female</option>
+            </select>
+          </label>
+          <label class="tl-toggle"><input type="checkbox" id="tl-only-dated" checked><span>Hide undated</span></label>
+          <label class="tl-toggle"><input type="checkbox" id="tl-scrub"><span>Year scrubber</span></label>
+          <div class="tl-spacer"></div>
+          <div class="tl-zoom">
+            <button class="btn icon ghost sm" data-act="tl-zoom-out" title="Zoom out">&minus;</button>
+            <button class="btn ghost sm" data-act="tl-fit" title="Fit timeline">Fit</button>
+            <button class="btn icon ghost sm" data-act="tl-zoom-in" title="Zoom in">+</button>
+          </div>
+        </div>
+        <div class="tl-body" id="tl-body">
+          <div class="tl-names" id="tl-names"></div>
+          <div class="tl-scroll" id="tl-scroll">
+            <div class="tl-canvas" id="tl-canvas">
+              <div class="tl-axis" id="tl-axis"></div>
+              <div class="tl-eras" id="tl-eras"></div>
+              <div class="tl-rows" id="tl-rows"></div>
+              <div class="tl-scrubber" id="tl-scrubber" hidden><div class="tl-scrub-line"></div><div class="tl-scrub-handle" id="tl-scrub-handle"></div></div>
+            </div>
+          </div>
+        </div>
+        <div class="tl-alive" id="tl-alive" hidden></div>
+        <div class="tl-undated" id="tl-undated"></div>
+      </div>
+
+    </section>
+
+    <aside class="inspector" id="inspector" hidden></aside>
+
+  </main>
+
+  <div class="statusbar" id="statusbar">
+    <span id="status-count"></span>
+    <span class="sep v"></span>
+    <span id="status-save" class="status-save">Saved</span>
+    <span class="tl-spacer"></span>
+    <span id="status-hint" class="status-hint">Double-click the canvas to add a person · drag from a bubble’s handle to link</span>
+  </div>
+
+</div>
+
+<div class="menu" id="context-menu" hidden></div>
+<div class="modal-root" id="modal-root" hidden></div>
+<div class="toasts" id="toasts"></div>
+<input type="file" id="file-input" accept="application/json,.json" hidden>
+
+<script src="js/util.js"></script>
+<script src="js/seed.js"></script>
+<script src="js/store.js"></script>
+<script src="js/lineage.js"></script>
+<script src="js/canvas.js"></script>
+<script src="js/inspector.js"></script>
+<script src="js/timeline.js"></script>
+<script src="js/sidebar.js"></script>
+<script src="js/io.js"></script>
+<script src="js/app.js"></script>
+</body>
+</html>
