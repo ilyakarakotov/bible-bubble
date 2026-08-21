@@ -388,6 +388,52 @@ function findChrome() {
     if (r.none !== null) throw new Error('a missing person found a path');
   });
 
+  await step('every control in the web toolbar does something', async () => {
+    const shot = () => page.evaluate(() => {
+      const c = document.querySelector('#web-canvas');
+      const d = c.getContext('2d').getImageData(0, 0, c.width, c.height).data;
+      let ink = 0;
+      for (let i = 3; i < d.length; i += 4 * 53) if (d[i] > 0) ink++;
+      return ink;
+    });
+    const all = await shot();
+    await page.click('[data-webshow="bonds"]');
+    await page.waitForTimeout(1600);
+    const bondsOnly = await shot();
+    if (bondsOnly >= all) throw new Error(`filtering to connections did not thin the web: ${all} -> ${bondsOnly}`);
+    await page.click('[data-webshow="all"]');
+    await page.waitForTimeout(1200);
+
+    await page.selectOption('#web-color', 'degree');
+    await page.selectOption('#web-labels', 'all');
+    await page.waitForTimeout(500);
+    const labelled = await page.evaluate(() => document.querySelector('#web-labels').value);
+    if (labelled !== 'all') throw new Error('label mode did not stick');
+    await page.selectOption('#web-labels', 'hubs');
+    await page.selectOption('#web-color', 'era');
+
+    await page.uncheck('#web-isolated');
+    await page.waitForTimeout(900);
+    await page.check('#web-isolated');
+    await page.waitForTimeout(900);
+
+    await page.click('[data-act="web-zoom-in"]');
+    await page.waitForTimeout(500);
+    await page.click('[data-act="web-fit"]');
+    await page.waitForTimeout(800);
+    const after = await shot();
+    if (after < 20) throw new Error('the web went blank after the toolbar was used');
+  });
+
+  await step('the web remembers how it was left', async () => {
+    await page.selectOption('#web-labels', 'all');
+    await page.waitForTimeout(400);
+    const saved = await page.evaluate(() => window.BB.store.prefs()['web.labels']);
+    if (saved !== 'all') throw new Error('not remembered: ' + saved);
+    await page.selectOption('#web-labels', 'hubs');
+    await page.waitForTimeout(300);
+  });
+
   await step('the web survives a theme switch', async () => {
     await page.click('[data-act="theme"]');
     await page.waitForTimeout(700);
