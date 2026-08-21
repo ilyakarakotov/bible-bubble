@@ -71,8 +71,10 @@
 }
 .web-none { font-size: 12px; color: var(--ink-3); line-height: 1.55; }
 
-.web-pair { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
-.web-pair select { height: 30px; padding: 0 24px 0 8px; font-size: 12.5px; background-position: calc(100% - 12px) 14px, calc(100% - 7px) 14px; }
+/* Stacked, not side by side: half of a 268px panel truncates both the
+   placeholder and any name longer than "Methuselah". */
+.web-pair { display: grid; gap: 6px; }
+.web-pair select { height: 32px; padding: 0 26px 0 9px; font-size: 13px; background-position: calc(100% - 13px) 15px, calc(100% - 8px) 15px; }
 
 .web-path-out { margin-top: 9px; max-height: 46vh; overflow-y: auto; }
 .web-path-lead { font-size: 13px; color: var(--ink); line-height: 1.5; margin-bottom: 6px; }

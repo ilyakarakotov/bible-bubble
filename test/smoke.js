@@ -388,6 +388,81 @@ function findChrome() {
     if (r.none !== null) throw new Error('a missing person found a path');
   });
 
+  await step('two connections between the same pair draw as two threads', async () => {
+    // The starter board has 18 pairs carrying more than one link, 13 of them a
+    // connection sharing a pair with a lineage line. Drawn as plain segments the
+    // two land on the same pixels and the second cannot be seen at all — which
+    // is the one thing this view exists to show. Checked on a board of its own,
+    // so the only ink on the canvas is the two circles and the threads.
+    const home = await page.evaluate(() => {
+      const S = window.BB.store, was = S.doc.id;
+      const twin = S.createBoard('Twin threads');
+      const a = S.addPerson({ name: 'Ay', x: -170, y: 0 }).id;
+      const b = S.addPerson({ name: 'Bee', x: 170, y: 0 }).id;
+      S.addLink(a, b, 'other', { kind: 'ally' });
+      return { was, twin, a, b };
+    });
+    await page.selectOption('#web-labels', 'none');
+    await page.waitForTimeout(2200);
+    // The view keeps the last board's zoom, and two people at the zoom that
+    // fitted 109 of them are specks. Fit before measuring.
+    await page.evaluate(() => window.BB.web.fit());
+    await page.waitForTimeout(900);
+
+    // Find the two circles — ink with more ink 4px away on every side, which a
+    // hairline thread never has — then measure how far the thread ink strays
+    // from the straight line joining their centres.
+    const spread = () => page.evaluate(() => {
+      const c = document.querySelector('#web-canvas');
+      const W = c.width, H = c.height;
+      const d = c.getContext('2d').getImageData(0, 0, W, H).data;
+      const on = (x, y) => x >= 0 && y >= 0 && x < W && y < H && d[(y * W + x) * 4 + 3] > 0;
+      const ink = [], disk = [];
+      for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
+        if (!on(x, y)) continue;
+        ink.push([x, y]);
+        if (on(x - 4, y) && on(x + 4, y) && on(x, y - 4) && on(x, y + 4)) disk.push([x, y]);
+      }
+      if (disk.length < 2 || !ink.length) return null;
+      const mid = (list, i) => list.reduce((sum, q) => sum + q[i], 0) / list.length;
+      let A = disk[0];
+      for (let i = 0; i < 3; i++) {
+        const near = disk.filter(q => Math.hypot(q[0] - A[0], q[1] - A[1]) < 40);
+        if (!near.length) break;
+        A = [mid(near, 0), mid(near, 1)];
+      }
+      const far = disk.filter(q => Math.hypot(q[0] - A[0], q[1] - A[1]) >= 40);
+      if (!far.length) return null;
+      const B = [mid(far, 0), mid(far, 1)];
+      const vx = B[0] - A[0], vy = B[1] - A[1], len = Math.hypot(vx, vy) || 1;
+      let worst = 0;
+      ink.forEach(([x, y]) => {
+        const t = ((x - A[0]) * vx + (y - A[1]) * vy) / (len * len);
+        if (t < 0.25 || t > 0.75) return;                 // skip the circles at each end
+        worst = Math.max(worst, Math.abs((x - A[0]) * vy - (y - A[1]) * vx) / len);
+      });
+      return { worst: Math.round(worst), apart: Math.round(len) };
+    });
+
+    const one = await spread();
+    if (!one) throw new Error('could not find the two circles');
+    await page.evaluate((h) => window.BB.store.addLink(h.a, h.b, 'other', { kind: 'rival' }), home);
+    await page.waitForTimeout(2200);
+    await page.evaluate(() => window.BB.web.fit());
+    await page.waitForTimeout(900);
+    const two = await spread();
+    if (!two) throw new Error('could not find the two circles after the second connection');
+    if (two.worst < 4 || two.worst <= one.worst + 2) {
+      throw new Error('the second connection is hidden under the first: thread ink strays '
+        + one.worst + 'px from the centre line with one connection, ' + two.worst
+        + 'px with two, over ' + two.apart + 'px between the circles');
+    }
+
+    await page.selectOption('#web-labels', 'hubs');
+    await page.evaluate((h) => { window.BB.store.openBoard(h.was); window.BB.store.deleteBoard(h.twin); }, home);
+    await page.waitForTimeout(1800);
+  });
+
   await step('every control in the web toolbar does something', async () => {
     const shot = () => page.evaluate(() => {
       const c = document.querySelector('#web-canvas');

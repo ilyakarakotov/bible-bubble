@@ -32,7 +32,7 @@
 
   /* ---------- interaction ---------- */
   let hoverId = null, drag = null, pan = null, pendingFocus = null;
-  let flashId = null, flashUntil = 0;
+  let flashId = null, flashUntil = 0, follow = null;
   let pathState = null;           // {ids:Set, links:Set, hops, steps}
 
   const opts = { show: 'all', color: 'era', labels: 'hubs', spread: 120, isolated: true, side: true };
@@ -103,8 +103,9 @@
     byId = next;
     nodes = Array.from(next.values());
     edges = shown.filter(l => next.has(l.from) && next.has(l.to)).map(l => ({
-      id: l.id, from: l.from, to: l.to, type: l.type, kind: l.kind || '', label: l.label || '',
+      id: l.id, from: l.from, to: l.to, type: l.type, kind: l.kind || '', label: l.label || '', lane: 0,
     }));
+    fanOut(edges);
 
     adj = new Map();
     nodes.forEach(n => adj.set(n.id, new Set()));
@@ -113,6 +114,30 @@
     eraOrder = null;
     if (hoverId && !byId.has(hoverId)) hoverId = null;
     return fresh > 0 || was !== nodes.length + '/' + edges.length;
+  }
+
+  /**
+   * Two people can be joined more than once — a father who is also a rival, a
+   * pair holding two different bonds. Drawn straight they would sit on top of
+   * each other and only one would ever show, so each link in a group takes its
+   * own lane and bows out of the way. A lone link keeps lane 0 and stays straight.
+   */
+  function fanOut(list) {
+    const groups = new Map();
+    list.forEach(e => {
+      const key = e.from < e.to ? e.from + '|' + e.to : e.to + '|' + e.from;
+      if (!groups.has(key)) groups.set(key, []);
+      groups.get(key).push(e);
+    });
+    groups.forEach(group => {
+      if (group.length < 2) return;
+      group.forEach((e, i) => { e.lane = i - (group.length - 1) / 2; });
+    });
+  }
+
+  /** Where an edge bends: 0 for a straight line, else the apex offset in world units. */
+  function laneBow(e, len) {
+    return e.lane ? e.lane * U.clamp(len * 0.16, 11, 30) : 0;
   }
 
   /* ================= the simulation ================= */
@@ -177,14 +202,33 @@
 
   function loop() {
     frame = requestAnimationFrame(loop);
-    if (tween) advanceTween();
     if (alpha > 0) tick();
+    if (follow) holdFollowed();
+    if (tween) advanceTween();
     draw();
     if (!busy()) {
       stopLoop();
+      follow = null;
       if (autoFit && nodes.length) { autoFit = false; fit(); }
     }
   }
+
+  /**
+   * Keep a person the user asked for under the middle of the screen while the
+   * layout is still moving — otherwise the view lands where they *were*.
+   */
+  function holdFollowed() {
+    const n = byId.get(follow);
+    if (!n) { follow = null; return; }
+    const k = tween ? tween.to.k : view.k;
+    const x = size.w / 2 - n.x * k;
+    const y = size.h / 2 - n.y * k;
+    if (tween) { tween.to.x = x; tween.to.y = y; }
+    else { view.x = x; view.y = y; }
+  }
+
+  /** The user has taken the view into their own hands. */
+  function letGo() { follow = null; autoFit = false; }
 
   function startLoop() {
     if (frame || !visible) return;
@@ -260,6 +304,7 @@
     measure();
     const b = bounds();
     if (!b || !size.w) return;
+    follow = null;
     const pad = (o && o.pad != null) ? o.pad : (isPhone() ? 34 : 60);
     const k = U.clamp(Math.min((size.w - pad * 2) / b.w, (size.h - pad * 2) / b.h), MIN_K, 1.6);
     glideTo({
@@ -275,7 +320,7 @@
     view.x = sx - (sx - view.x) * scale;
     view.y = sy - (sy - view.y) * scale;
     view.k = k;
-    autoFit = false;
+    letGo();
     requestPaint();
   }
 
@@ -299,6 +344,7 @@
     autoFit = false;
     flashId = id;
     flashUntil = performance.now() + 1500;
+    follow = id;
     const k = Math.max(view.k, 0.75);
     glideTo({ k, x: size.w / 2 - n.x * k, y: size.h / 2 - n.y * k }, 320);
     startLoop();
@@ -419,7 +465,16 @@
         ctx.setLineDash(st.dash ? st.dash.map(d => d / view.k) : []);
         ctx.beginPath();
         ctx.moveTo(a.x, a.y);
-        ctx.lineTo(b.x, b.y);
+        const dx = b.x - a.x, dy = b.y - a.y;
+        const len = Math.hypot(dx, dy) || 1;
+        const bow = laneBow(e, len);
+        if (bow) {
+          // The curve peaks at half the control point, so aim it twice as far out.
+          ctx.quadraticCurveTo(
+            (a.x + b.x) / 2 - (dy / len) * bow * 2,
+            (a.y + b.y) / 2 + (dx / len) * bow * 2,
+            b.x, b.y);
+        } else ctx.lineTo(b.x, b.y);
         ctx.stroke();
       }
     }
@@ -601,13 +656,13 @@
       // Pin where it stands: a plain click must not stir the layout, only a drag.
       drag = { id: n.id, moved: false, at };
       n.fx = n.x; n.fy = n.y;
-      autoFit = false;
+      letGo();
       if (e.pointerType === 'touch') {
         holdTimer = setTimeout(() => { holdTimer = 0; setHover(n.id, at); }, 380);
       }
     } else {
       pan = { x: at.x, y: at.y, vx: view.x, vy: view.y, moved: false };
-      autoFit = false;
+      letGo();
     }
     e.preventDefault();
   }
@@ -737,7 +792,7 @@
     [pathA, pathB].forEach(sel => {
       const had = sel.value;
       sel.replaceChildren(
-        el('option', { value: '', text: 'Choose someone' }),
+        el('option', { value: '', text: sel === pathA ? 'Choose someone' : '…and someone else' }),
         ...people.map(p => el('option', { value: p.id, text: p.name || 'Unnamed' })),
       );
       if (had && S.person(had)) sel.value = had;
@@ -762,12 +817,6 @@
     const sex = who ? who.sex : '';
     if (parentFirst) return sex === 'f' ? 'mother of' : sex === 'm' ? 'father of' : 'parent of';
     return sex === 'f' ? 'daughter of' : sex === 'm' ? 'son of' : 'child of';
-  }
-
-  function clearPath() {
-    if (!pathState) return;
-    pathState = null;
-    requestPaint();
   }
 
   function runPath() {
@@ -799,8 +848,10 @@
       links: new Set((res.steps || []).map(s => s.linkId)),
       hops: res.hops,
     };
+    // "step", not "connection": a connection means a bond everywhere else in the
+    // app, and these hops run along lineage links as well.
     const lead = el('p.web-path-lead', {
-      text: nameOf(b) + ' is ' + U.plural(res.hops, 'connection') + ' from ' + nameOf(a) + '.',
+      text: nameOf(b) + ' is ' + U.plural(res.hops, 'step') + ' from ' + nameOf(a) + '.',
     });
     const rows = (res.steps || []).map(s => el('div.web-step', {}, [
       el('button.web-step-name', { type: 'button', 'data-id': s.from, text: nameOf(s.from), onclick: () => focus(s.from) }),
@@ -933,12 +984,19 @@
     if (C && typeof C.on === 'function') C.on('select', () => { if (visible) requestPaint(); });
 
     if (typeof ResizeObserver === 'function') {
+      // Switching views resizes the stage to nothing; show() measures again on
+      // the way back, so a hidden view has nothing to do here.
       new ResizeObserver(() => {
-        if (!visible) { dirty = true; return; }
-        if (measure()) requestPaint();
+        if (visible && measure()) requestPaint();
       }).observe(stage);
     }
     window.addEventListener('resize', () => { if (visible && measure()) requestPaint(); });
+
+    // Nothing else tells a settled canvas that the palette changed under it.
+    if (typeof MutationObserver === 'function') {
+      new MutationObserver(() => { themeCache = null; requestPaint(); })
+        .observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] });
+    }
 
     ready = true;
     dirty = true;
@@ -968,7 +1026,7 @@
     if (paintFrame) { cancelAnimationFrame(paintFrame); paintFrame = 0; }
     cancelHold();
     if (drag) { const n = byId.get(drag.id); if (n) { n.fx = null; n.fy = null; } drag = null; }
-    pan = null; pinch = null; touches.clear();
+    pan = null; pinch = null; touches.clear(); follow = null;
     setHover(null);
     hideTip();
   }
