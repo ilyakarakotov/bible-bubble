@@ -13,6 +13,10 @@ const fs = require('fs');
 const path = require('path');
 
 const ROOT = path.join(__dirname, '..');
+
+/* What the starter board should contain. Update these when the seed changes. */
+const SEED = { people: 109, links: 178, bonds: 40 };
+
 const PORT = Number(process.env.PORT || 8799);
 const TYPES = { '.html': 'text/html', '.js': 'text/javascript', '.css': 'text/css', '.json': 'application/json' };
 
@@ -98,12 +102,12 @@ function findChrome() {
     const t = await page.textContent('.modal-head h3');
     if (!/Welcome/.test(t)) throw new Error('got: ' + t);
   });
-  await step('starter lineage loads 105 people', async () => {
+  await step(`starter lineage loads ${SEED.people} people`, async () => {
     await page.click('button:has-text("Start from Adam")');
     await page.waitForTimeout(1400);
     const n = await bubbles();
-    if (n !== 105) throw new Error('bubbles: ' + n);
-    if (await links() !== 133) throw new Error('links: ' + await links());
+    if (n !== SEED.people) throw new Error('bubbles: ' + n);
+    if (await links() !== SEED.links) throw new Error('links: ' + await links());
   });
   await step('lands at a readable zoom on the head of the line', async () => {
     const z = parseInt(await page.textContent('.zoom-label'), 10);
@@ -244,6 +248,155 @@ function findChrome() {
     if (!/Ruth 1:16/.test(p.notes)) throw new Error('notes lost');
   });
 
+
+  console.log('\nconnections');
+  await step('the starter board carries non-lineage connections', async () => {
+    const r = await page.evaluate(() => {
+      const kinds = new Set(window.BB.model.BOND_KINDS.map(k => k.id));
+      const bonds = window.BB.store.bonds();
+      const bad = bonds.filter(b => !kinds.has(b.kind) || b.from === b.to ||
+        !window.BB.store.person(b.from) || !window.BB.store.person(b.to));
+      return { n: bonds.length, bad: bad.length, unlabelled: bonds.filter(b => !b.label).length,
+        stats: window.BB.lineage.stats(window.BB.store.doc).bonds };
+    });
+    if (r.n !== SEED.bonds) throw new Error('connections: ' + r.n);
+    if (r.bad) throw new Error(r.bad + ' malformed connections');
+    if (r.unlabelled) throw new Error(r.unlabelled + ' connections with nothing written on them');
+    if (r.stats !== r.n) throw new Error('stats disagree: ' + r.stats);
+  });
+
+  await step('a connection is drawn as a coloured arc, not a lineage line', async () => {
+    const bond = await page.evaluate(() => {
+      const b = window.BB.store.bonds()[0];
+      window.BB.canvas.focus(b.from, { zoom: 0.7, animate: false, flash: false });
+      return b.id;
+    });
+    await page.waitForTimeout(400);
+    const e = await page.evaluate((id) => {
+      const g = document.querySelector(`.edge[data-id="${id}"]`);
+      if (!g) return null;
+      const p = g.querySelector('.edge-path');
+      return { cls: g.getAttribute('class'), d: p.getAttribute('d'),
+        stroke: getComputedStyle(p).stroke, title: (g.querySelector('title') || {}).textContent };
+    }, bond);
+    if (!e) throw new Error('the connection is not on the canvas');
+    if (!/kind-/.test(e.cls)) throw new Error('no kind on the edge: ' + e.cls);
+    if (!/^M .* Q /.test(e.d)) throw new Error('not an arc: ' + e.d);
+    // A custom property applied through a style object is dropped silently, and
+    // that once left every one of these invisible while still laying out right.
+    if (/rgba\(0, 0, 0, 0\)|transparent/.test(e.stroke)) throw new Error('invisible: ' + e.stroke);
+    if (!e.title) throw new Error('no tooltip on the connection');
+  });
+
+  await step('the same link reads correctly from both ends', async () => {
+    const r = await page.evaluate(() => {
+      const b = window.BB.store.bonds()[0];
+      const k = window.BB.model.bondKind(b.kind);
+      const out = window.BB.lineage.bondsOf(b.from).find(x => x.linkId === b.id);
+      const back = window.BB.lineage.bondsOf(b.to).find(x => x.linkId === b.id);
+      return { out: out && out.dir, back: back && back.dir, from: k.out, to: k.in };
+    });
+    if (r.out !== 'out' || r.back !== 'in') throw new Error(JSON.stringify(r));
+  });
+
+  await step('making a connection through the dialog', async () => {
+    const before = await links();
+    await page.evaluate(() => {
+      const p = Object.values(window.BB.store.doc.people).find(x => x.name === 'Enoch');
+      window.BB.canvas.select([p.id]);
+      window.BB.app.addBond(p.id);
+    });
+    await page.waitForTimeout(350);
+    await page.fill('.modal input[type="search"]', 'Noah');
+    await page.waitForTimeout(300);
+    await page.click('.picker-item');
+    await page.click('.kind-chips .chip[data-kind="mentor"]');
+    await page.fill('.bond-label', 'Walked with God before him');
+    await page.click('.modal-foot .btn.primary');
+    await page.waitForTimeout(450);
+    if (await links() !== before + 1) throw new Error('link not added');
+    const made = await page.evaluate(() =>
+      window.BB.store.bonds().find(b => b.label === 'Walked with God before him'));
+    if (!made || made.kind !== 'mentor') throw new Error(JSON.stringify(made));
+  });
+
+  await step('the same pair can hold two different connections but not two of a kind', async () => {
+    const r = await page.evaluate(() => {
+      const b = window.BB.store.bonds().find(x => x.label === 'Walked with God before him');
+      const second = window.BB.store.addLink(b.from, b.to, 'other', { kind: 'ally' });
+      const repeat = window.BB.store.addLink(b.to, b.from, 'other', { kind: 'mentor' });
+      return { second: second.ok, repeat: repeat.reason };
+    });
+    if (!r.second) throw new Error('a second kind was refused');
+    if (r.repeat !== 'duplicate') throw new Error('a repeat was allowed: ' + r.repeat);
+  });
+
+  await step('deleting a person takes their connections with them', async () => {
+    const r = await page.evaluate(() => {
+      const p = window.BB.store.addPerson({ name: 'Passing acquaintance' });
+      const anchor = Object.values(window.BB.store.doc.people).find(x => x.name === 'Noah');
+      window.BB.store.addLink(anchor.id, p.id, 'other', { kind: 'met' });
+      const mid = Object.keys(window.BB.store.doc.links).length;
+      window.BB.store.removePeople([p.id]);
+      return { mid, after: Object.keys(window.BB.store.doc.links).length };
+    });
+    if (r.after !== r.mid - 1) throw new Error(JSON.stringify(r));
+    await page.evaluate(() => { window.BB.store.undo(); window.BB.store.undo(); window.BB.store.undo(); });
+    await page.waitForTimeout(300);
+  });
+
+  console.log('\nthe web');
+  await step('the web view draws every person', async () => {
+    await page.click('.tab[data-view="web"]');
+    await page.waitForTimeout(2600);
+    const r = await page.evaluate(() => {
+      const c = document.querySelector('#web-canvas');
+      const ctx = c.getContext('2d');
+      const d = ctx.getImageData(0, 0, c.width, c.height).data;
+      let ink = 0;
+      for (let i = 3; i < d.length; i += 4 * 97) if (d[i] > 0) ink++;
+      return { w: c.width, h: c.height, ink, rank: document.querySelector('#web-rank').textContent };
+    });
+    if (r.w < 200 || r.h < 200) throw new Error('canvas is ' + r.w + 'x' + r.h);
+    if (r.ink < 20) throw new Error('the web is blank: ' + r.ink + ' samples with ink');
+    if (!/Jacob/.test(r.rank)) throw new Error('ranking looks wrong: ' + r.rank.slice(0, 80));
+  });
+
+  await step('the most-connected list agrees with the graph', async () => {
+    const r = await page.evaluate(() => {
+      const top = window.BB.lineage.ranking(window.BB.store.doc, 3);
+      return top.map(t => ({
+        name: window.BB.store.person(t.id).name,
+        degree: t.degree,
+        counted: window.BB.lineage.neighbours(t.id).length,
+      }));
+    });
+    r.forEach(x => { if (x.degree !== x.counted) throw new Error(JSON.stringify(x)); });
+    if (r[0].degree < r[1].degree) throw new Error('not sorted: ' + JSON.stringify(r));
+  });
+
+  await step('how far apart counts the hops between two people', async () => {
+    const r = await page.evaluate(() => {
+      const byName = (n) => Object.values(window.BB.store.doc.people).find(p => p.name === n);
+      const path = window.BB.lineage.connectionPath(byName('Adam').id, byName('Jesus').id);
+      const none = window.BB.lineage.connectionPath(byName('Adam').id, 'nobody-at-all');
+      return { hops: path && path.hops, len: path && path.ids.length,
+        steps: path && path.steps.length, none };
+    });
+    if (!r.hops || r.hops < 40) throw new Error('Adam to Jesus in ' + r.hops + ' hops');
+    if (r.len !== r.hops + 1 || r.steps !== r.hops) throw new Error(JSON.stringify(r));
+    if (r.none !== null) throw new Error('a missing person found a path');
+  });
+
+  await step('the web survives a theme switch', async () => {
+    await page.click('[data-act="theme"]');
+    await page.waitForTimeout(700);
+    await page.click('[data-act="theme"]');
+    await page.waitForTimeout(700);
+    await page.click('.tab[data-view="canvas"]');
+    await page.waitForTimeout(400);
+  });
+
   console.log('\nboards and files');
   await step('tidy layout leaves no overlapping bubbles', async () => {
     await page.click('[data-act="layout"]');
@@ -297,6 +450,7 @@ function findChrome() {
     await page.waitForTimeout(800);
     const md = await page.evaluate(() => window.BB.io.toMarkdown());
     if (!/Adam/.test(md) || !/Jesus/.test(md)) throw new Error('incomplete outline');
+    if (!/connection/.test(md.split('\n')[2])) throw new Error('no connection count in the summary');
   });
 
   const other = errors.length - errors.filter(e => /^"/.test(e)).length;

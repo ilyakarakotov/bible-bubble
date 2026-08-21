@@ -946,8 +946,10 @@
     const close = modal('Welcome to Bible Bubble', [
       el('p', { text: 'A canvas for tracking who came from who — one bubble per person, links for lineage, and a timeline that lays every life on the same axis.' }),
       el('div.about-note', { html:
-        'Start from <strong>Adam</strong> with the built-in line down to Jesus — 105 people with ages, ' +
-        'references and highlights already filled in — or begin with an empty canvas and build your own.' }),
+        'Start from <strong>Adam</strong> with the built-in line down to Jesus — ' +
+        `${BB.seed.count} people with ages, references and highlights already filled in, ` +
+        `and ${BB.seed.bonds} connections between them that are not lineage — ` +
+        'or begin with an empty canvas and build your own.' }),
     ], [
       el('button.btn', { type: 'button', text: 'Empty canvas', onclick: () => { close(); S.renameBoard('My lineage'); refreshBoards(); } }),
       el('button.btn.primary', { type: 'button', text: 'Start from Adam', onclick: () => { close(); loadSeedIntoBoard(); } }),

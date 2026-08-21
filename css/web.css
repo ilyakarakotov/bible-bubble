@@ -74,7 +74,7 @@
 .web-pair { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
 .web-pair select { height: 30px; padding: 0 24px 0 8px; font-size: 12.5px; background-position: calc(100% - 12px) 14px, calc(100% - 7px) 14px; }
 
-.web-path-out { margin-top: 9px; }
+.web-path-out { margin-top: 9px; max-height: 46vh; overflow-y: auto; }
 .web-path-lead { font-size: 13px; color: var(--ink); line-height: 1.5; margin-bottom: 6px; }
 .web-step {
   display: flex; align-items: center; gap: 5px; flex-wrap: wrap;
@@ -104,12 +104,17 @@
 
 /* ---------- touch ---------- */
 @media (pointer: coarse) {
-  .web-toolbar select, .web-pair select { font-size: 16px; }
+  /* Anything a finger lands on gets a 40px target, and no text under 16px:
+     Safari zooms the whole page when a focused field is smaller than that. */
+  .web-toolbar select, .web-toolbar input, .web-pair select { font-size: 16px; }
   .web-toolbar select { height: 32px; }
   .web-pair select { height: 40px; background-position: calc(100% - 12px) 19px, calc(100% - 7px) 19px; }
   .web-toolbar input[type="range"] { height: 40px; }
+  .web-toolbar .chip, .web-toolbar .btn { min-height: 40px; }
+  .web-toolbar .chip { padding: 0 14px; }
+  .web-toolbar .btn.icon { min-width: 40px; }
   .web-rank-row { min-height: 40px; }
-  .web-step-name { min-height: 26px; }
+  .web-step { min-height: 40px; }
 }
 
 /* ---------- phone ---------- */

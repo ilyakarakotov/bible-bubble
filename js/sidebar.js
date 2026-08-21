@@ -127,6 +127,7 @@
     const bits = [
       U.plural(st.people, 'person', 'people'),
       U.plural(st.links, 'link'),
+      st.bonds ? U.plural(st.bonds, 'connection') : null,
       st.generations ? st.generations + ' generations' : null,
     ].filter(Boolean);
     footEl.replaceChildren(el('span', { text: bits.join(' · ') }));

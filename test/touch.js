@@ -74,15 +74,18 @@ function findChrome() {
   };
   const cls = () => page.evaluate(() => document.querySelector('#app').className);
   const cs = (sel, prop) => page.evaluate(([s, p]) => getComputedStyle(document.querySelector(s))[p], [sel, prop]);
+  /** Select and centre someone, and hand back their bubble on screen. */
   const centre = async (name) => {
-    const ok = await page.evaluate((n) => {
+    const id = await page.evaluate((n) => {
       const p = Object.values(window.BB.store.doc.people).find(x => x.name === n);
-      if (!p) return false;
+      if (!p) return null;
+      window.BB.canvas.select([p.id]);
       window.BB.canvas.focus(p.id, { zoom: 0.9, animate: false, flash: false });
-      return true;
+      return p.id;
     }, name);
-    if (!ok) throw new Error('no person named ' + name);
+    if (!id) throw new Error('no person named ' + name);
     await page.waitForTimeout(400);
+    return id;
   };
   const pageScrollsSideways = () => page.evaluate(() =>
     document.documentElement.scrollWidth > document.documentElement.clientWidth + 1);
@@ -108,11 +111,11 @@ function findChrome() {
 
   console.log('\ntouching the canvas');
   await step('tapping a bubble selects it and names it in the bottom bar', async () => {
-    await centre('Adam');
-    const at = await page.evaluate(() => {
-      const b = document.querySelector('.bubble.is-sel, .bubble').getBoundingClientRect();
+    const id = await centre('Adam');
+    const at = await page.evaluate((pid) => {
+      const b = document.querySelector(`.bubble[data-id="${pid}"]`).getBoundingClientRect();
       return { x: b.x + b.width / 2, y: b.y + 22 };
-    });
+    }, id);
     await page.touchscreen.tap(at.x, at.y);
     await page.waitForTimeout(400);
     const label = await page.textContent('#mb-details-label');
@@ -133,11 +136,11 @@ function findChrome() {
   });
 
   await step('long-press opens the context menu', async () => {
-    await centre('Ruth');
-    const at = await page.evaluate(() => {
-      const b = document.querySelector('.bubble.is-sel').getBoundingClientRect();
+    const id = await centre('Ruth');
+    const at = await page.evaluate((pid) => {
+      const b = document.querySelector(`.bubble[data-id="${pid}"]`).getBoundingClientRect();
       return { x: b.x + b.width / 2, y: b.y + 20 };
-    });
+    }, id);
     await page.evaluate(([x, y]) => {
       const t = document.elementFromPoint(x, y);
       t.dispatchEvent(new PointerEvent('pointerdown', {

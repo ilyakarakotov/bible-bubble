@@ -35,9 +35,10 @@ Hosting it yourself takes one dropdown and no build step: **Settings → Pages �
 Source: Deploy from a branch → `main` → `/ (root)` → Save**. GitHub then serves
 the files as they are and re-publishes on every push.
 
-On first run it offers to start you from **Adam** with 105 people already filled
+On first run it offers to start you from **Adam** with 109 people already filled
 in — the line down to Jesus, with ages, dates, scripture references and
-highlights — or to hand you an empty canvas.
+highlights, plus 40 recorded connections that are not lineage — or to hand you an
+empty canvas.
 
 ---
 

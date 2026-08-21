@@ -469,25 +469,29 @@
     drawLabels(t, lit, sel);
   }
 
-  function labelCandidates(lit, sel) {
-    const forced = [];
+  function labelCandidates(sel) {
+    const forced = new Set();
     const rest = [];
     nodes.forEach(n => {
-      if (n.id === hoverId || sel.has(n.id) || (pathState && pathState.ids.has(n.id))) forced.push(n);
+      if (n.id === hoverId || sel.has(n.id) || (pathState && pathState.ids.has(n.id))) forced.add(n);
       else rest.push(n);
     });
     let mode = opts.labels;
     // Zoomed far out, names turn to mush — thin them out rather than pile them up.
     if (mode === 'all' && view.k < 0.5) mode = 'hubs';
-    if (mode === 'hubs' && view.k < 0.28) mode = 'none';
-    if (mode === 'none') return forced;
-    rest.sort((a, b) => b.deg - a.deg);
-    if (mode === 'hubs') return forced.concat(rest.filter(n => n.deg > 1).slice(0, HUB_LABELS));
-    return forced.concat(rest);
+    if (mode === 'hubs' && view.k < 0.2) mode = 'none';
+    const list = Array.from(forced);
+    if (mode !== 'none') {
+      rest.sort((a, b) => b.deg - a.deg);
+      list.push(...(mode === 'hubs' ? rest.filter(n => n.deg > 1) : rest));
+    }
+    // The budget counts names actually drawn, so zooming in spends it on what is
+    // on screen rather than on hubs that sit somewhere off in the dark.
+    return { list, forced, budget: mode === 'hubs' ? HUB_LABELS : Infinity };
   }
 
   function drawLabels(t, lit, sel) {
-    const list = labelCandidates(lit, sel);
+    const { list, forced, budget } = labelCandidates(sel);
     if (!list.length) return;
     const fs = view.k < 0.7 ? 11 : 12;
     ctx.font = '600 ' + fs + 'px ' + 'ui-serif, Georgia, "Times New Roman", serif';
@@ -495,8 +499,10 @@
     ctx.textBaseline = 'top';
     ctx.lineJoin = 'round';
     const taken = [];
+    let spent = 0;
     for (let i = 0; i < list.length; i++) {
       const n = list[i];
+      if (!forced.has(n) && spent >= budget) break;
       const on = !lit || lit.has(n.id);
       if (!on && n.id !== hoverId) continue;
       const s = toScreen(n.x, n.y);
@@ -506,6 +512,7 @@
       const box = { x: s.x - w / 2 - 3, y: s.y + n.r * view.k + 3, w: w + 6, h: fs + 4 };
       if (taken.some(r => U.rectsOverlap(box, r))) continue;
       taken.push(box);
+      if (!forced.has(n)) spent++;
       ctx.globalAlpha = on ? 1 : 0.4;
       ctx.strokeStyle = t.bg;
       ctx.lineWidth = 3;
@@ -884,11 +891,16 @@
     refresh();
   }
 
+  function paintEmpty() {
+    if (emptyEl) emptyEl.hidden = S.count() > 0;
+  }
+
   function refresh() {
     if (!ready) return;
     if (!visible) { dirty = true; return; }
     const changed = build();
     paintSide();
+    paintEmpty();
     if (changed) kick(0.45); else requestPaint();
   }
 
@@ -946,7 +958,7 @@
     } else {
       requestPaint();
     }
-    if (emptyEl) emptyEl.hidden = S.count() > 0;
+    paintEmpty();
     if (pendingFocus) { const id = pendingFocus; pendingFocus = null; focus(id); }
   }
 

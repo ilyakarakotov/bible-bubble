@@ -108,12 +108,6 @@
       kids:['lot'] },
 
     /* ---------------- the patriarchs ---------------- */
-    { id:'lot', n:'Lot', g:'m', r:'Abraham’s nephew', e:'The patriarchs', par:'haran',
-      refs:['Gen 12:5','Gen 13','Gen 14:12–16','Gen 19','2 Pet 2:7–8'],
-      hl:['Went with Abraham into Canaan, and chose the whole Jordan valley for himself.',
-          'Carried off when the four kings sacked Sodom, and brought back by his uncle.',
-          'Pulled out of the city by the hand as it burned; his wife looked back.',
-          'Called "righteous Lot, greatly distressed by the sensual conduct of the wicked".'] },
     { id:'abraham', n:'Abraham', g:'m', aka:['Abram'], b:2008, a:175, r:'Father of the faithful', e:'The patriarchs',
       refs:['Gen 12–25','Rom 4','Heb 11:8–19','Jas 2:23'],
       hl:['Called out of Ur: "Go from your country… and I will make of you a great nation."',
@@ -139,6 +133,12 @@
       hl:['Born to Abraham at 86 by Hagar — "God hears".',
           'Blessed for Abraham’s sake with twelve princes and a great nation.',
           'A wild donkey of a man, dwelling over against all his kinsmen.'] },
+    { id:'lot', n:'Lot', g:'m', r:'Abraham’s nephew', e:'The patriarchs', par:'haran',
+      refs:['Gen 12:5','Gen 13','Gen 14:12–16','Gen 19','2 Pet 2:7–8'],
+      hl:['Went with Abraham into Canaan, and chose the whole Jordan valley for himself.',
+          'Carried off when the four kings sacked Sodom, and brought back by his uncle.',
+          'Pulled out of the city by the hand as it burned; his wife looked back.',
+          'Called "righteous Lot, greatly distressed by the sensual conduct of the wicked".'] },
     { id:'isaac', n:'Isaac', g:'m', b:2108, a:180, r:'The son of promise', e:'The patriarchs',
       refs:['Gen 21–28','Gen 35:28–29','Heb 11:20'],
       hl:['Born when Abraham was 100 and Sarah 90 — his name means "he laughs".',
@@ -461,7 +461,8 @@
     { a:'zilpah', b:'leah', k:'servant', l:'Given to Jacob when her mistress stopped bearing', note:'Gen 30:9–13' },
 
     /* ---------------- the twelve ---------------- */
-    { a:'reuben', b:'bilhah', k:'harmed', l:'Lay with his father’s concubine, and lost his birthright', note:'Gen 35:22; Gen 49:4; 1 Chr 5:1' },
+    { a:'reuben', b:'bilhah', k:'harmed', l:'Lay with his father’s concubine, and lost his birthright',
+      note:'Gen 35:22; Gen 49:4; 1 Chr 5:1' },
     { a:'simeon', b:'levi', k:'ally', l:'Took their swords together against Shechem for Dinah', note:'Gen 34:25–26' },
     { a:'judah', b:'joseph', k:'harmed', l:'Proposed selling him to the Ishmaelites for twenty pieces', note:'Gen 37:26–28' },
     { a:'reuben', b:'joseph', k:'rescued', l:'Talked them out of killing him, meaning to take him home', note:'Gen 37:21–22' },
