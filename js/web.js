@@ -322,6 +322,8 @@
       ink3: v('--ink-3', '#8b8172'),
       accent: v('--accent', '#b4802f'),
       link: v('--link', '#a8935f'),
+      serif: v('--serif', 'Georgia, "Times New Roman", serif'),
+      sans: v('--font', 'system-ui, sans-serif'),
       hue: {},
     };
     U.PALETTE_KEYS.forEach(k => { t.hue[k] = v('--c-' + k, '#8d8b84'); });
@@ -403,10 +405,11 @@
 
     /* edges — quiet ones first so the lit threads sit on top */
     for (let pass = 0; pass < 2; pass++) {
+      const wantLit = pass === 1;
       for (let i = 0; i < edges.length; i++) {
         const e = edges[i];
         const on = edgeIsLit(e, lit);
-        if ((pass === 0) === on) continue;
+        if (on !== wantLit) continue;
         const a = byId.get(e.from), b = byId.get(e.to);
         if (!a || !b) continue;
         const st = edgeStyle(e, t);
@@ -491,7 +494,7 @@
     const { list, forced, budget } = labelCandidates(sel);
     if (!list.length) return;
     const fs = view.k < 0.7 ? 11 : 12;
-    ctx.font = '600 ' + fs + 'px ' + 'ui-serif, Georgia, "Times New Roman", serif';
+    ctx.font = '600 ' + fs + 'px ' + t.serif;
     ctx.textAlign = 'center';
     ctx.textBaseline = 'top';
     ctx.lineJoin = 'round';
@@ -523,7 +526,7 @@
   function drawNote(t) {
     if (!size.w || S.count() === 0) return;
     ctx.fillStyle = t.ink3;
-    ctx.font = '13px ' + 'system-ui, sans-serif';
+    ctx.font = '13px ' + t.sans;
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
     ctx.fillText('Nobody matches these filters.', size.w / 2, size.h / 2);
@@ -595,10 +598,10 @@
     const n = nodeAt(at.x, at.y);
     try { cv.setPointerCapture(e.pointerId); } catch (_) {}
     if (n) {
+      // Pin where it stands: a plain click must not stir the layout, only a drag.
       drag = { id: n.id, moved: false, at };
       n.fx = n.x; n.fy = n.y;
       autoFit = false;
-      kick(0.36);
       if (e.pointerType === 'touch') {
         holdTimer = setTimeout(() => { holdTimer = 0; setHover(n.id, at); }, 380);
       }
@@ -651,8 +654,9 @@
           tapAt = 0;
         } else { tapAt = now; tapPos = { x: e.clientX, y: e.clientY }; }
       }
+      const moved = drag.moved;
       drag = null;
-      kick(0.18);
+      if (moved) kick(0.18);
       return;
     }
     if (pan) {
