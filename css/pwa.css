@@ -1,0 +1,93 @@
+/* ============================================================
+   Bible Bubble — the install nudge
+   Phone-only, shown at most once, and never over the bottom bar.
+   ============================================================ */
+
+.pwa-nudge {
+  position: fixed;
+  z-index: 380;                     /* above the canvas HUD, below toasts */
+  left: max(10px, env(safe-area-inset-left));
+  right: max(10px, env(safe-area-inset-right));
+  bottom: calc(var(--mobilebar-h, 58px) + env(safe-area-inset-bottom) + 10px);
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 10px 10px 12px;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-lg);
+  color: var(--ink);
+  opacity: 0;
+  transform: translateY(14px);
+  transition: opacity .22s ease, transform .22s ease;
+}
+.pwa-nudge.is-in { opacity: 1; transform: none; }
+
+.pwa-nudge-mark { margin-top: 1px; }
+
+.pwa-nudge-body {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.pwa-nudge-body strong { font-size: 13px; font-weight: 600; line-height: 1.25; }
+.pwa-nudge-body span { font-size: 12px; line-height: 1.35; color: var(--ink-2); }
+.pwa-nudge-body b { font-weight: 600; color: var(--ink); }
+
+.pwa-nudge-go,
+.pwa-nudge-x {
+  position: relative;
+  flex: none;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+.pwa-nudge-go:focus-visible,
+.pwa-nudge-x:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+
+.pwa-nudge-go {
+  height: 34px;
+  min-width: 74px;
+  padding: 0 14px;
+  border: 1px solid var(--accent);
+  border-radius: 9px;
+  background: var(--accent);
+  color: #fff;
+  font-size: 13px;
+  font-weight: 600;
+}
+.pwa-nudge-go:active { transform: translateY(.5px); }
+
+.pwa-nudge-x {
+  width: 30px;
+  height: 30px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--ink-3);
+}
+.pwa-nudge-x:active { background: var(--panel-2); }
+.pwa-nudge-x svg {
+  width: 16px; height: 16px;
+  fill: none; stroke: currentColor; stroke-width: 1.8;
+  stroke-linecap: round; stroke-linejoin: round;
+}
+
+/* Both controls sit in a 44px tap target without looking 44px tall. */
+.pwa-nudge-go::after { content: ''; position: absolute; inset: -5px -3px; }
+.pwa-nudge-x::after { content: ''; position: absolute; inset: -7px; }
+
+/* Only ever offered on a phone; a rotation to tablet width takes it away. */
+@media (min-width: 701px) {
+  .pwa-nudge { display: none; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .pwa-nudge { transition: none; transform: none; }
+  .pwa-nudge-go:active { transform: none; }
+}

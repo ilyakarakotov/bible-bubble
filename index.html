@@ -2,13 +2,23 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Bible Bubble — lineage canvas</title>
 <meta name="description" content="An infinite canvas for mapping Bible lineages: bubbles for people, links for who came from who, and one giant timeline.">
 <meta name="color-scheme" content="light dark">
+<meta name="theme-color" content="#f4f0e8" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#14161a" media="(prefers-color-scheme: dark)">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<meta name="apple-mobile-web-app-title" content="Bible Bubble">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Ccircle cx='11' cy='11' r='7' fill='%23c8963e'/%3E%3Ccircle cx='22' cy='22' r='5' fill='%237a9e7e'/%3E%3Cpath d='M14 15 L19 20' stroke='%23c8963e' stroke-width='2'/%3E%3C/svg%3E">
 <link rel="stylesheet" href="css/app.css">
 <link rel="stylesheet" href="css/web.css">
+<link rel="stylesheet" href="css/pwa.css">
+<link rel="stylesheet" href="css/mobile.css">
 </head>
 <body>
 
@@ -129,6 +139,7 @@
             <button class="btn ghost sm zoom-label" data-act="zoom-reset" title="Reset zoom (0)">100%</button>
             <button class="btn icon ghost sm" data-act="zoom-in" title="Zoom in (+)">+</button>
             <span class="sep v"></span>
+            <button class="btn icon ghost sm only-phone" data-act="fit" title="Fit to screen"><svg><use href="#i-fit"/></svg></button>
             <button class="btn icon ghost sm" data-act="toggle-grid" title="Toggle grid (G)"><svg><use href="#i-grid"/></svg></button>
             <button class="btn icon ghost sm" data-act="help" title="Keyboard shortcuts (?)"><svg><use href="#i-help"/></svg></button>
           </div>
@@ -254,6 +265,8 @@
 
   </main>
 
+  <div class="peek" id="peek" hidden></div>
+
   <nav class="mobilebar" id="mobilebar" aria-label="Main navigation">
     <button class="mb-item" data-mb="lineage" aria-label="Lineage panel"><svg><use href="#i-trace"/></svg><span>Lineage</span></button>
     <button class="mb-item is-active" data-mb="canvas" aria-label="Canvas"><svg><use href="#i-canvas"/></svg><span>Canvas</span></button>
@@ -290,5 +303,7 @@
 <script src="js/io.js"></script>
 <script src="js/web.js"></script>
 <script src="js/app.js"></script>
+<script src="js/peek.js"></script>
+<script src="js/pwa.js"></script>
 </body>
 </html>

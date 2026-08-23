@@ -1,0 +1,58 @@
+{
+  "id": "./",
+  "name": "Bible Bubble",
+  "short_name": "Bubble",
+  "description": "An infinite canvas for mapping Bible lineages: bubbles for people, links for who came from who, and one giant timeline. Everything stays on your own device, online or off.",
+  "start_url": ".",
+  "scope": ".",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#f4f0e8",
+  "theme_color": "#f4f0e8",
+  "lang": "en",
+  "dir": "ltr",
+  "categories": ["education", "books", "productivity"],
+  "icons": [
+    {
+      "src": "icons/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "icons/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "icons/icon-maskable-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "maskable"
+    }
+  ],
+  "shortcuts": [
+    {
+      "name": "Lineage canvas",
+      "short_name": "Canvas",
+      "description": "Open the canvas of bubbles and lineage links",
+      "url": "./?view=canvas",
+      "icons": [{ "src": "icons/shortcut-canvas.png", "sizes": "96x96", "type": "image/png" }]
+    },
+    {
+      "name": "Web of connections",
+      "short_name": "Web",
+      "description": "See who is tied to who across the whole board",
+      "url": "./?view=web",
+      "icons": [{ "src": "icons/shortcut-web.png", "sizes": "96x96", "type": "image/png" }]
+    },
+    {
+      "name": "Timeline",
+      "short_name": "Timeline",
+      "description": "Lay every life out along one run of years",
+      "url": "./?view=timeline",
+      "icons": [{ "src": "icons/shortcut-timeline.png", "sizes": "96x96", "type": "image/png" }]
+    }
+  ]
+}

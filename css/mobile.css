@@ -1,0 +1,161 @@
+/* ============================================================
+   Bible Bubble — the phone canvas: peek card, lifted bubbles,
+   picking a link target. Loaded last, so it has the final word.
+   ============================================================ */
+
+/* ---------- a bubble a finger has picked up ---------- */
+/* Long-press lifts a person off the canvas; it has to look picked up, or the
+   next thing that moves feels like an accident. */
+.bubble.is-lifted {
+  transform: scale(1.07);
+  border-color: var(--b-accent, var(--accent));
+  box-shadow:
+    0 0 0 3px color-mix(in srgb, var(--b-accent, var(--accent)) 34%, transparent),
+    0 14px 30px rgba(0, 0, 0, .30);
+  z-index: 40;
+}
+:root[data-theme="dark"] .bubble.is-lifted { box-shadow:
+  0 0 0 3px color-mix(in srgb, var(--b-accent, var(--accent)) 40%, transparent),
+  0 16px 34px rgba(0, 0, 0, .6); }
+
+/* ---------- picking who to link to ---------- */
+.viewport.is-picking { cursor: crosshair; }
+.viewport.is-picking .bubble.is-source {
+  opacity: .6;
+  border-style: dashed;
+}
+.viewport.is-picking .bubble.is-target {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 32%, transparent), var(--shadow-md);
+}
+.viewport.is-picking .bubble.is-target::before {
+  content: "+";
+  position: absolute; top: -11px; right: -11px; width: 26px; height: 26px;
+  display: grid; place-items: center;
+  border-radius: 50%; background: var(--accent); color: var(--panel);
+  font-size: 18px; font-weight: 700; line-height: 1;
+  box-shadow: var(--shadow-sm); z-index: 4;
+  animation: peek-beat 1.8s ease-in-out infinite;
+}
+@keyframes peek-beat {
+  0%, 100% { transform: scale(1); }
+  50%      { transform: scale(1.14); }
+}
+
+/* ---------- the peek card ---------- */
+.peek { display: none; }
+.peek[hidden] { display: none !important; }
+
+@media (max-width: 700px) {
+  .peek {
+    position: fixed; left: 0; right: 0; z-index: 40;
+    bottom: calc(var(--mobilebar-h) + env(safe-area-inset-bottom));
+    display: flex; flex-direction: column; gap: 7px;
+    padding: 5px 10px 11px;
+    padding-left: max(10px, env(safe-area-inset-left));
+    padding-right: max(10px, env(safe-area-inset-right));
+    background: var(--panel);
+    border-top: 1px solid var(--line);
+    border-radius: 16px 16px 0 0;
+    box-shadow: var(--shadow-lg);
+    transform: translateY(calc(100% + 14px));
+    transition: transform .22s cubic-bezier(.2, .9, .3, 1);
+    /* The card runs its own swipe-to-dismiss, and nothing in it scrolls. */
+    touch-action: none;
+    user-select: none;
+    -webkit-tap-highlight-color: transparent;
+  }
+  .peek.is-open { transform: none; }
+
+  .peek-grip {
+    flex: none; width: 38px; height: 4px; margin: 1px auto 0;
+    border-radius: 999px; background: var(--line);
+  }
+
+  .peek-main {
+    display: flex; align-items: center; gap: 10px; width: 100%;
+    min-height: 42px; padding: 0 2px; margin: 0;
+    background: none; border: 0; color: inherit; font: inherit;
+    text-align: left; cursor: pointer;
+  }
+  .peek-dot { flex: none; width: 11px; height: 11px; border-radius: 50%; }
+  .peek-text { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
+  .peek-name {
+    font-family: var(--serif); font-size: 17.5px; font-weight: 600; line-height: 1.2;
+    color: var(--ink); white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  }
+  .peek-sub {
+    font-size: 12px; color: var(--ink-2); line-height: 1.3;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  }
+  .peek-stats {
+    flex: none; display: flex; flex-direction: column; align-items: flex-end; gap: 1px;
+    font-size: 11px; line-height: 1.3; color: var(--ink-3);
+    font-variant-numeric: tabular-nums; white-space: nowrap;
+  }
+  .peek-main:active .peek-name { color: var(--accent-ink); }
+
+  .peek-acts { display: flex; gap: 6px; }
+  .peek-act {
+    flex: 1; min-width: 0; min-height: 48px;
+    display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 3px;
+    padding: 0 2px; border: 1px solid var(--line); border-radius: 13px;
+    background: var(--panel-2); color: var(--ink-2);
+    font-size: 11px; font-weight: 500; cursor: pointer;
+    -webkit-tap-highlight-color: transparent;
+  }
+  .peek-act svg {
+    width: 19px; height: 19px; fill: none; stroke: currentColor;
+    stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round;
+  }
+  .peek-dots { font-size: 17px; line-height: 19px; height: 19px; letter-spacing: 1.5px; }
+  .peek-act:active { background: var(--accent-soft); border-color: var(--accent); }
+  .peek-act.is-on { background: var(--accent-soft); border-color: var(--accent); color: var(--accent-ink); }
+
+  /* --- picking a target --- */
+  .peek.mode-pick { background: var(--accent-soft); border-top-color: var(--accent); }
+  .peek-banner { display: flex; align-items: center; gap: 10px; min-height: 48px; }
+  .peek-banner-text { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
+  .peek-banner-text strong { font-size: 15px; color: var(--accent-ink); line-height: 1.25; }
+  .peek-banner-text span { font-size: 11.5px; color: var(--ink-2); }
+  .peek-cancel { flex: none; min-height: 44px; padding: 0 18px; font-size: 14px; }
+  .peek-cancel.wide { width: 100%; justify-content: center; }
+
+  /* --- how are these two related? --- */
+  .peek-ask { padding: 0 2px; font-size: 13px; color: var(--ink-2); }
+  .peek-choices { display: flex; flex-direction: column; gap: 6px; }
+  .peek-choice {
+    display: flex; align-items: center; justify-content: space-between; gap: 8px;
+    min-height: 48px; padding: 0 14px; border-radius: 13px;
+    border: 1px solid var(--line); background: var(--panel-2);
+    color: var(--ink); font-family: var(--font); font-size: 15px; font-weight: 500;
+    text-align: left; cursor: pointer; -webkit-tap-highlight-color: transparent;
+  }
+  .peek-choice svg { flex: none; width: 15px; height: 15px; fill: none; stroke: var(--ink-3); stroke-width: 2; }
+  .peek-choice:active { background: var(--accent-soft); border-color: var(--accent); }
+
+  /* The HUD and the toasts step aside rather than hide under the card. */
+  .canvas-hud { transition: bottom .2s cubic-bezier(.2, .9, .3, 1); }
+  #app.peek-open .canvas-hud { bottom: calc(var(--peek-h, 0px) + 8px); }
+  #app.peek-open ~ .toasts {
+    bottom: calc(var(--mobilebar-h) + var(--peek-h, 0px) + 12px + env(safe-area-inset-bottom));
+  }
+
+  /* Thumb-sized canvas controls: 32px is a mouse target, not a finger. */
+  .zoomctl .btn.sm { min-height: 40px; min-width: 40px; }
+  .zoomctl .btn.sm svg { width: 18px; height: 18px; }
+  .zoom-label { min-width: 52px; font-size: 12.5px; }
+  .trace-bar .btn.sm { min-height: 36px; padding: 0 12px; }
+
+  /* No grey flash when a finger lands on the canvas. */
+  .bubble, .b-handle, .mb-item, .empty-actions .btn { -webkit-tap-highlight-color: transparent; }
+}
+
+/* Landscape phones have no height to spare: keep the card to one thin line. */
+@media (max-width: 900px) and (max-height: 500px) {
+  .peek { gap: 5px; padding-bottom: 8px; }
+  .peek-grip { display: none; }
+  .peek-sub { display: none; }
+  .peek-act { min-height: 42px; }
+  .peek-choice { min-height: 42px; }
+}
