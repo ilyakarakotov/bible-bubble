@@ -323,8 +323,22 @@ function findChrome() {
     }, id);
     if (Math.abs(after.x - before.x) < 20) throw new Error('they did not move: ' + before.x + ' -> ' + after.x);
     if (Math.abs(after.view - before.view) > 2) throw new Error('the canvas panned as well as carrying them');
-    await page.evaluate(() => window.BB.store.undo());
-    await page.waitForTimeout(350);
+    // And there has to be a way back. There is no keyboard here, so the offer
+    // has to arrive with the change that caused it.
+    const undo = page.locator('.toast button', { hasText: /undo/i });
+    if (!(await undo.count())) {
+      throw new Error('carried them with no offer to undo it; toasts: '
+        + JSON.stringify(await page.locator('.toast').allTextContents()));
+    }
+    await undo.first().click();
+    await page.waitForTimeout(600);
+    const home = await page.evaluate((pid) => {
+      const p = window.BB.store.person(pid);
+      return { x: p.x, y: p.y };
+    }, id);
+    if (Math.abs(home.x - before.x) > 1 || Math.abs(home.y - before.y) > 1) {
+      throw new Error('undo left them at ' + home.x + ',' + home.y + ' instead of ' + before.x + ',' + before.y);
+    }
   });
 
   await step('a drag that starts on a bubble pans, and leaves them where they were', async () => {
@@ -494,6 +508,51 @@ function findChrome() {
     await shot('phone-web');
   });
 
+  await step('tapping a circle in the web surfaces the person, as the canvas does', async () => {
+    // Every view should answer the same question the same way. This one used to
+    // put up a tooltip and leave you to find the person somewhere else.
+    const at = await page.evaluate(() => {
+      const p = Object.values(window.BB.store.doc.people).find(x => x.name === 'Noah');
+      window.BB.web.focus(p.id);
+      const st = document.querySelector('#web-stage').getBoundingClientRect();
+      return { x: Math.round(st.left + st.width / 2), y: Math.round(st.top + st.height / 2) };
+    });
+    await page.waitForTimeout(1000);
+    await page.touchscreen.tap(at.x, at.y);
+    await page.waitForTimeout(800);
+    if (!/panel-details/.test(await cls())) throw new Error('no sheet after tapping a circle');
+    const name = await page.inputValue('.insp-name-input');
+    const bar = await page.textContent('#mb-details-label');
+    if (!name || name !== bar) throw new Error('the sheet says "' + name + '", the bar says "' + bar + '"');
+  });
+
+  await step('the sheet comes back to the page you left it on', async () => {
+    await page.tap('.insp-page:has-text("Connections")');
+    await page.waitForTimeout(400);
+    await page.touchscreen.tap(195, 60);
+    await page.waitForTimeout(500);
+    await page.tap('[data-mb="details"]');
+    await page.waitForTimeout(600);
+    const on = await page.textContent('.insp-page.is-on');
+    if (!/Connections/.test(on)) throw new Error('it reopened on "' + on + '"');
+  });
+
+  await step('following a relative walks the family without shutting the sheet', async () => {
+    await page.tap('.insp-page:has-text("Family")');
+    await page.waitForTimeout(400);
+    const first = await page.textContent('.rel-item .rel-name');
+    await page.tap('.rel-item');
+    await page.waitForTimeout(800);
+    if (!/panel-details/.test(await cls())) throw new Error('the sheet closed on the way');
+    const name = await page.inputValue('.insp-name-input');
+    if (name !== first) throw new Error('landed on "' + name + '" after tapping "' + first + '"');
+    const on = await page.textContent('.insp-page.is-on');
+    if (!/Family/.test(on)) throw new Error('and on the "' + on + '" page');
+    await page.touchscreen.tap(195, 60);
+    await page.waitForTimeout(500);
+    await shot('phone-details');
+  });
+
   await step('the timeline via the bottom bar', async () => {
     await page.tap('[data-mb="timeline"]');
     await page.waitForTimeout(900);
@@ -502,9 +561,115 @@ function findChrome() {
     const names = await page.evaluate(() => Math.round(document.querySelector('.tl-names').getBoundingClientRect().width));
     if (names > 130) throw new Error('names column ' + names + 'px on a 390px screen');
     if (await pageScrollsSideways()) throw new Error('the timeline overflows the page');
+    await shot('phone-timeline');
+  });
+
+  await step('one tap on a timeline row picks the person out, a second opens them', async () => {
+    // Every name is already on screen here, so throwing a sheet up on the first
+    // touch costs more than it tells you.
+    const row = page.locator('.tl-name-row').nth(3);
+    const who = (await row.textContent()).replace(/g\d+$/, '').trim();
+    await row.tap();
+    await page.waitForTimeout(500);
+    if (/panel-details/.test(await cls())) throw new Error('the first tap threw the sheet up');
+    const bar = await page.textContent('#mb-details-label');
+    if (!bar.startsWith(who.slice(0, 4))) throw new Error('bar says "' + bar + '", row says "' + who + '"');
+    await row.tap();
+    await page.waitForTimeout(700);
+    if (!/panel-details/.test(await cls())) throw new Error('the second tap did nothing');
+    await page.touchscreen.tap(195, 60);
+    await page.waitForTimeout(500);
+  });
+
+  await step('dragging the timeline names scrolls the chart with them', async () => {
+    // The names column used to be a transform mirror of the chart with nothing
+    // to take hold of, so the only way to scroll was to find the chart itself.
+    const before = await page.evaluate(() => document.querySelector('#tl-scroll').scrollTop);
+    const box = await page.locator('.tl-names').boundingBox();
+    await page.evaluate(([x, y]) => {
+      const n = document.querySelector('.tl-names');
+      const at = (cy) => [new Touch({ identifier: 1, target: n, clientX: x, clientY: cy })];
+      const fire = (type, cy) => n.dispatchEvent(new TouchEvent(type, {
+        bubbles: true, cancelable: true,
+        touches: type === 'touchend' ? [] : at(cy),
+        targetTouches: type === 'touchend' ? [] : at(cy),
+        changedTouches: at(cy),
+      }));
+      fire('touchstart', y);
+      for (let i = 1; i <= 10; i++) fire('touchmove', y - i * 22);
+      fire('touchend', y - 220);
+    }, [Math.round(box.x + box.width / 2), Math.round(box.y + box.height * 0.7)]);
+    await page.waitForTimeout(500);
+    const after = await page.evaluate(() => document.querySelector('#tl-scroll').scrollTop);
+    if (after <= before + 100) throw new Error('scrollTop ' + before + ' -> ' + after);
+    if (/panel-details/.test(await cls())) throw new Error('the drag was taken for a tap');
+  });
+
+  console.log('\nthe drawers');
+
+  await step('a row in the lineage drawer reveals the person and gets out of the way', async () => {
     await page.tap('[data-mb="canvas"]');
     await page.waitForTimeout(500);
+    await page.tap('[data-mb="lineage"]');
+    await page.waitForTimeout(600);
+    const h = await page.evaluate(() => Math.round(document.querySelector('.tree-row').getBoundingClientRect().height));
+    if (h < 44) throw new Error('rows are ' + h + 'px tall');
+    await page.tap('.tree-row:has-text("Noah")');
+    await page.waitForTimeout(800);
+    if (/panel-lineage/.test(await cls())) throw new Error('the drawer stayed over the canvas');
+    const bar = await page.textContent('#mb-details-label');
+    if (bar !== 'Noah') throw new Error('the selection did not follow: "' + bar + '"');
+  });
+
+  await step('its collapse arrows are a real target, not a 12px glyph', async () => {
+    await page.tap('[data-mb="lineage"]');
+    await page.waitForTimeout(600);
+    const before = await page.locator('.tree-row').count();
+    // The glyph itself stays small; what grows is an invisible ::after around it.
+    // So aim outside the glyph and see whether the tap still lands. Pick an arrow
+    // that is open, not a hidden leaf, and well inside the scrolled drawer.
+    const twist = await page.evaluate(() => {
+      const body = document.querySelector('#side-body').getBoundingClientRect();
+      const n = Array.from(document.querySelectorAll('.tree-row .tree-twist')).find(t => {
+        if (t.classList.contains('is-leaf') || !t.classList.contains('is-open')) return false;
+        const r = t.getBoundingClientRect();
+        return r.top > body.top + 30 && r.bottom < body.bottom - 30;
+      });
+      if (!n) return null;
+      const r = n.getBoundingClientRect();
+      const g = getComputedStyle(n, '::after');
+      return {
+        x: r.x + r.width / 2, y: r.y + r.height / 2,
+        w: r.width + Math.abs(parseFloat(g.left)) * 2,
+        h: r.height + Math.abs(parseFloat(g.top)) * 2,
+        up: r.top - Math.abs(parseFloat(g.top)) / 2,
+      };
+    });
+    if (!twist) throw new Error('no open arrow sitting clear in the drawer');
+    if (twist.w < 40 || twist.h < 44) throw new Error('the target is ' + Math.round(twist.w) + 'x' + Math.round(twist.h));
+    await page.touchscreen.tap(twist.x, twist.up);
+    await page.waitForTimeout(700);
+    const after = await page.locator('.tree-row').count();
+    if (after >= before) throw new Error('rows ' + before + ' -> ' + after + ': a tap in the padding missed');
+    await page.touchscreen.tap(twist.x, twist.y);
+    await page.waitForTimeout(500);
+    await page.evaluate(() => window.BB.app.closePanels());
+    await page.waitForTimeout(400);
     await shot('phone-canvas');
+  });
+
+  await step('sharing a board falls back to a download where the API is missing', async () => {
+    // Which is the common case, not the edge: no desktop browser has it, and
+    // neither does a page opened off the disk.
+    const state = await page.evaluate(() => ({
+      can: window.BB.io.canShare(), api: typeof navigator.canShare,
+    }));
+    if (state.can !== false) throw new Error('canShare() said ' + state.can + ' with navigator.canShare ' + state.api);
+    const [file] = await Promise.all([
+      page.waitForEvent('download', { timeout: 6000 }),
+      page.evaluate(() => window.BB.io.shareBoard()),
+    ]);
+    if (!/\.json$/.test(file.suggestedFilename())) throw new Error('it saved ' + file.suggestedFilename());
   });
 
   const other = errors.length - errors.filter(e => /^"/.test(e)).length;

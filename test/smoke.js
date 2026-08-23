@@ -574,6 +574,104 @@ function findChrome() {
     if (!/connection/.test(md.split('\n')[2])) throw new Error('no connection count in the summary');
   });
 
+  console.log('\nthe address bar');
+
+  await step('a view can be opened straight from a link', async () => {
+    // The installed app's shortcuts point at ./?view=web and ./?view=timeline,
+    // so this is not decoration — it is how those menu items work.
+    await page.goto(`http://127.0.0.1:${PORT}/index.html?view=web`, { waitUntil: 'networkidle' });
+    await page.waitForTimeout(1600);
+    const open = await page.evaluate(() => ({
+      cls: document.querySelector('#app').className,
+      web: !!(window.BB.web && window.BB.web.isOpen()),
+    }));
+    if (!open.web || !/view-web/.test(open.cls)) throw new Error('landed on ' + open.cls);
+  });
+
+  await step('the person you are looking at is in the URL, and survives a reload', async () => {
+    const id = await page.evaluate(() => {
+      const p = Object.values(window.BB.store.doc.people).find(x => x.name === 'Noah');
+      window.BB.app.setView('canvas');
+      window.BB.canvas.select([p.id]);
+      return p.id;
+    });
+    await page.waitForTimeout(900);
+    const url = page.url();
+    if (!url.includes(id)) throw new Error('the URL is ' + url);
+    await page.reload({ waitUntil: 'networkidle' });
+    await page.waitForTimeout(1600);
+    const back = await page.evaluate(() => window.BB.canvas.selected());
+    if (back.length !== 1 || back[0] !== id) throw new Error('came back with ' + JSON.stringify(back));
+  });
+
+  await step('back steps between views instead of leaving the app', async () => {
+    // An installed app has nothing behind its first page, so a back press that
+    // walked out of it would look like the app crashing.
+    await page.evaluate(() => window.BB.app.setView('timeline'));
+    await page.waitForTimeout(900);
+    await page.goBack({ waitUntil: 'load' });
+    await page.waitForTimeout(1100);
+    const cls = await page.evaluate(() => document.querySelector('#app').className);
+    if (/view-timeline/.test(cls)) throw new Error('back did nothing: ' + cls);
+    if (!/view-canvas|view-web/.test(cls)) throw new Error('back landed on ' + cls);
+    await page.evaluate(() => window.BB.app.setView('canvas'));
+    await page.waitForTimeout(700);
+  });
+
+  await step('deleting someone offers the way back where it happened', async () => {
+    // A dragged bubble deliberately gets no toast on a desktop — ⌘Z is right
+    // there, and a toast per drag would be noise. Losing a person is different,
+    // and a phone has no keyboard at all: test/touch.js covers the finger path.
+    const gone = await page.evaluate(() => {
+      const p = Object.values(window.BB.store.doc.people).find(x => x.name === 'Ruth');
+      window.BB.canvas.select([p.id]);
+      return { id: p.id, name: p.name };
+    });
+    await page.waitForTimeout(400);
+    const n0 = await page.evaluate(() => window.BB.store.count());
+    await page.evaluate(() => window.BB.app.deleteSelected());
+    await page.waitForTimeout(700);
+    if (await page.evaluate(() => window.BB.store.count()) !== n0 - 1) throw new Error('nobody was deleted');
+    const undo = page.locator('.toast button', { hasText: /undo/i });
+    if (!(await undo.count())) throw new Error('a deletion passed without an offer to undo it');
+    await undo.first().click();
+    await page.waitForTimeout(600);
+    if (!await page.evaluate((id) => !!window.BB.store.person(id), gone.id)) {
+      throw new Error(gone.name + ' did not come back');
+    }
+  });
+
+  await step('the view tabs say which one is chosen, out loud', async () => {
+    const aria = await page.evaluate(() => {
+      window.BB.app.setView('web');
+      return null;
+    });
+    void aria;
+    await page.waitForTimeout(900);
+    const tabs = await page.evaluate(() => Array.from(document.querySelectorAll('.viewtabs .tab'))
+      .map(t => [t.dataset.view, t.getAttribute('aria-selected'), t.tabIndex]));
+    const on = tabs.filter(t => t[1] === 'true');
+    if (on.length !== 1 || on[0][0] !== 'web') throw new Error('aria-selected is ' + JSON.stringify(tabs));
+    // Roving tabindex: one stop for the whole group, not three.
+    if (tabs.filter(t => t[2] === 0).length !== 1) throw new Error('tabindex is ' + JSON.stringify(tabs));
+    await page.evaluate(() => window.BB.app.setView('canvas'));
+    await page.waitForTimeout(700);
+  });
+
+  await step('the buttons floating over the canvas actually do something', async () => {
+    // They did not: the canvas takes pointer capture on a background pointerdown,
+    // so the mouseup retargeted to the viewport and the click never arrived.
+    const before = await page.evaluate(() => window.BB.canvas.view.k);
+    await page.click('.zoomctl [data-act="zoom-out"]');
+    await page.waitForTimeout(400);
+    const after = await page.evaluate(() => window.BB.canvas.view.k);
+    if (!(after < before)) throw new Error(`zoom ${before.toFixed(2)} -> ${after.toFixed(2)}`);
+    await page.click('.zoomctl [data-act="toggle-grid"]');
+    await page.waitForTimeout(300);
+    await page.click('.zoomctl [data-act="toggle-grid"]');
+    await page.waitForTimeout(300);
+  });
+
   const other = errors.length - errors.filter(e => /^"/.test(e)).length;
   console.log(`\n${failures ? 'FAIL' : 'PASS'} — ${failures} failing step(s), ${other} console/page error(s)`);
   if (errors.length) errors.forEach(e => console.log('  ' + e));
