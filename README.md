@@ -143,7 +143,21 @@ other person — drag around, pinch, take your time — tap them, and say how th
 related. Handles still work if you prefer them.
 
 Details opens as a sheet over the canvas, and the canvas shifts so the person it
-is about stays visible above it. Flick the sheet down to dismiss it.
+is about stays visible above it. Flick the sheet down to dismiss it. Inside, the
+seven sections become four pages — **About**, **Family**, **Connections**,
+**Notes** — so the one you want is a tap away rather than a scroll. It remembers
+which page you left each person on, and tapping a relative walks you to them
+without closing anything, so following a family is one tap a step. Typing lifts
+the sheet over the keyboard instead of hiding the field under it.
+
+The other two views answer the same way. **Tap a circle in the web** and you get
+the person, not a tooltip; its display controls move into a sheet so the graph
+keeps the screen. On the **timeline**, one tap picks a name out and a second
+opens it — every name is already on screen, so a sheet on the first touch would
+cost more than it tells you — and the names column scrolls when you drag it.
+
+**Export offers the share sheet** where the phone has one, so a board can go
+straight to Files, a note, or a message.
 
 <p align="center">
   <img src="docs/mobile-canvas.png" alt="The canvas on a phone" width="23%">
@@ -158,6 +172,14 @@ connections, a lineage outline in the sidebar, a tidy auto-layout that arranges
 the whole board into generations, light and dark themes, and export to JSON,
 Markdown or CSV. The layout adapts from a phone up to a wide desktop, and every
 control is sized for a finger on touch devices.
+
+**Where you are is in the URL** — `?view=web`, `#p=noah` — so a view or a person
+can be linked to, bookmarked or reopened, and the back button steps between views
+instead of out of the app.
+
+**Undo finds you.** Lose someone by accident and the offer to put them back
+arrives where it happened, not just on a keyboard shortcut you cannot press on a
+phone: *Deleted Ruth · Undo*.
 
 ![Dark theme](docs/dark.png)
 
@@ -223,6 +245,7 @@ sw.js               the service worker: precache the shell, serve it offline
 icons/              the app icon, maskable and Apple variants
 css/app.css         the main stylesheet, themed with custom properties
 css/web.css         styles for the web view
+css/panels.css      the detail sheet, drawer and timeline on a phone
 css/mobile.css      phone-only canvas styling, loaded last
 css/pwa.css         the install prompt
 js/util.js          helpers, the palette, year parsing and formatting
