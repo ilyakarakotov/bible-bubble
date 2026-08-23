@@ -87,6 +87,42 @@ function findChrome() {
     await page.waitForTimeout(400);
     return id;
   };
+  /** Where to put a finger on someone's bubble. */
+  const bubbleAt = (id) => page.evaluate((pid) => {
+    const b = document.querySelector(`.bubble[data-id="${pid}"]`).getBoundingClientRect();
+    return { x: Math.round(b.x + b.width / 2), y: Math.round(b.y + 20) };
+  }, id);
+  /* Raw pointer events, because half the gesture vocabulary is now about holding
+     still and Playwright's touchscreen can only tap and swipe. */
+  const finger = (type, x, y, onTarget) => page.evaluate(([t, px, py, hit]) => {
+    const at = hit ? (document.elementFromPoint(px, py) || document.querySelector('#viewport'))
+      : document.querySelector('#viewport');
+    at.dispatchEvent(new PointerEvent(t, {
+      pointerId: 1, pointerType: 'touch', isPrimary: true,
+      clientX: px, clientY: py, bubbles: true, button: 0,
+    }));
+  }, [type, Math.round(x), Math.round(y), !!onTarget]);
+  const down = (x, y) => finger('pointerdown', x, y, true);
+  const move = (x, y) => finger('pointermove', x, y);
+  const lift = (x, y) => finger('pointerup', x, y);
+  const shutSheets = async () => {
+    await page.evaluate(() => {
+      window.BB.app.closePanels();
+      if (window.BB.canvas.isPicking()) window.BB.canvas.endLinkMode();
+      if (window.BB.peek) window.BB.peek.hide();
+    });
+    await page.waitForTimeout(300);
+  };
+  const emptySpot = () => page.evaluate(() => {
+    const vp = document.querySelector('#viewport').getBoundingClientRect();
+    for (let x = vp.left + 30; x < vp.right - 30; x += 26) {
+      for (let y = vp.top + 90; y < vp.bottom - 160; y += 26) {
+        const e = document.elementFromPoint(x, y);
+        if (e && !e.closest('.bubble') && !e.closest('.canvas-hud') && !e.closest('.edge')) return { x, y };
+      }
+    }
+    return null;
+  });
   const pageScrollsSideways = () => page.evaluate(() =>
     document.documentElement.scrollWidth > document.documentElement.clientWidth + 1);
 
@@ -135,28 +171,229 @@ function findChrome() {
     if (h.w < 24) throw new Error('handle only ' + h.w + 'px on screen');
   });
 
-  await step('long-press opens the context menu', async () => {
+  await step('tapping a bubble says who it is, right where you tapped', async () => {
+    // The whole point of the rework. Selecting someone used to rename a button at
+    // the bottom of the screen and nothing else, so finding out who you had hold
+    // of meant going looking for the answer.
+    const id = await centre('Noah');
+    const at = await bubbleAt(id);
+    await page.touchscreen.tap(at.x, at.y);
+    await page.waitForTimeout(500);
+    if (await page.isHidden('#peek')) throw new Error('no card after tapping a bubble');
+    const card = await page.evaluate(() => ({
+      name: (document.querySelector('.peek-name') || {}).textContent,
+      sub: (document.querySelector('.peek-sub') || {}).textContent || '',
+      stats: Array.from(document.querySelectorAll('.peek-stats span')).map(n => n.textContent),
+      acts: Array.from(document.querySelectorAll('#peek [data-peek]')).map(n => n.dataset.peek),
+      small: Array.from(document.querySelectorAll('#peek [data-peek]'))
+        .filter(n => n.getBoundingClientRect().height < 40).length,
+    }));
+    if (card.name !== 'Noah') throw new Error('the card says "' + card.name + '"');
+    if (!/\d/.test(card.sub)) throw new Error('no years on the card: "' + card.sub + '"');
+    if (!card.stats.some(t => /link/.test(t))) throw new Error('no link count: ' + card.stats.join(' / '));
+    ['details', 'trace', 'link', 'more'].forEach(k => {
+      if (!card.acts.includes(k)) throw new Error('no "' + k + '" action: ' + card.acts.join(', '));
+    });
+    if (card.small) throw new Error(card.small + ' actions are under 40px tall');
+    if (/panel-details/.test(await cls())) throw new Error('a tap threw the whole sheet up');
+    await shot('phone-peek');
+  });
+
+  await step('the card opens the details, and keeps its subject above the sheet', async () => {
+    await page.tap('#peek [data-peek="details"]');
+    await page.waitForTimeout(900);
+    if (!/panel-details/.test(await cls())) throw new Error('details did not open');
+    const room = await page.evaluate(() => {
+      const id = window.BB.canvas.selected()[0];
+      const b = document.querySelector(`.bubble[data-id="${id}"]`);
+      const sheet = document.querySelector('#inspector');
+      if (!b) return null;
+      return {
+        bottom: Math.round(b.getBoundingClientRect().bottom),
+        sheet: Math.round(sheet.getBoundingClientRect().top),
+        top: Math.round(b.getBoundingClientRect().top),
+        bar: Math.round(document.querySelector('.topbar').getBoundingClientRect().bottom),
+      };
+    });
+    if (!room) throw new Error('the selected bubble vanished');
+    // A full bubble is taller than the strip a 70vh sheet leaves behind, so it
+    // cannot clear it outright. What matters is that its head — the row with the
+    // name on it — is showing, so you can see who the sheet is talking about.
+    const seen = Math.min(room.bottom, room.sheet) - Math.max(room.top, room.bar);
+    if (seen < 56) throw new Error('only ' + seen + 'px of the bubble is left showing');
+    if (room.top < room.bar) throw new Error('the bubble was pushed up under the top bar');
+    if (room.top > room.sheet) throw new Error('the bubble is entirely behind the sheet');
+    await shutSheets();
+  });
+
+  await step('the card reaches the same menu a right-click gives on a desktop', async () => {
+    await shutSheets();
     const id = await centre('Ruth');
-    const at = await page.evaluate((pid) => {
-      const b = document.querySelector(`.bubble[data-id="${pid}"]`).getBoundingClientRect();
-      return { x: b.x + b.width / 2, y: b.y + 20 };
-    }, id);
-    await page.evaluate(([x, y]) => {
-      const t = document.elementFromPoint(x, y);
-      t.dispatchEvent(new PointerEvent('pointerdown', {
-        pointerId: 1, pointerType: 'touch', isPrimary: true, clientX: x, clientY: y, bubbles: true, button: 0,
-      }));
-    }, [at.x, at.y]);
-    await page.waitForTimeout(750);
-    if (!await page.isVisible('#context-menu')) throw new Error('no menu after holding');
+    await page.touchscreen.tap(...Object.values(await bubbleAt(id)));
+    await page.waitForTimeout(450);
+    await page.tap('#peek [data-peek="more"]');
+    await page.waitForTimeout(400);
+    if (!await page.isVisible('#context-menu')) throw new Error('no menu from the card');
     const txt = await page.textContent('#context-menu');
     if (!/Add a son/.test(txt)) throw new Error('wrong menu: ' + txt.slice(0, 40));
-    await page.evaluate(([x, y]) => {
-      document.querySelector('#viewport').dispatchEvent(new PointerEvent('pointerup', {
-        pointerId: 1, pointerType: 'touch', clientX: x, clientY: y, bubbles: true,
-      }));
-    }, [at.x, at.y]);
     await page.keyboard.press('Escape');
+    await page.waitForTimeout(250);
+  });
+
+  await step('linking is two taps, where a hairline drag never worked', async () => {
+    await shutSheets();
+    const a = await centre('Ruth');
+    await page.touchscreen.tap(...Object.values(await bubbleAt(a)));
+    await page.waitForTimeout(450);
+    const links = await page.evaluate(() => Object.keys(window.BB.store.doc.links).length);
+    await page.tap('#peek [data-peek="link"]');
+    await page.waitForTimeout(450);
+    if (!await page.isVisible('.peek-banner')) throw new Error('no banner in link mode');
+    const picking = await page.evaluate(() => ({
+      on: document.querySelector('#viewport').classList.contains('is-picking'),
+      targets: document.querySelectorAll('.bubble.is-target').length,
+    }));
+    if (!picking.on) throw new Error('the canvas is not in target-pick mode');
+    if (picking.targets < 2) throw new Error('only ' + picking.targets + ' bubbles offered as targets');
+    // Everyone near Ruth is already related to her, and the graph refuses both a
+    // cycle and a second link of the same kind — so linking to a neighbour would
+    // prove nothing. Go and find a stranger, which is exactly what the banner
+    // tells you to do: "drag to look around". Panning has to keep working inside
+    // link mode for that instruction to be honest.
+    const b = await page.evaluate((from) => {
+      const S = window.BB.store, L = window.BB.lineage;
+      const ids = (v) => Array.from(v || []).map(x => (x && x.id) || x);
+      const barred = new Set([from]
+        .concat(ids(L.ancestors(from)))
+        .concat(ids(L.descendants(from)))
+        .concat(ids(L.neighbours(from))));
+      const me = S.person(from);
+      const near = S.people()
+        .filter(p => !barred.has(p.id))
+        .sort((p, q) => Math.hypot(p.x - me.x, p.y - me.y) - Math.hypot(q.x - me.x, q.y - me.y))[0];
+      return near ? { id: near.id, name: near.name } : null;
+    }, a);
+    if (!b) throw new Error('nobody on this board is a stranger to Ruth');
+    await page.evaluate((id) => window.BB.canvas.focus(id, { zoom: 0.9, animate: false, flash: false }), b.id);
+    await page.waitForTimeout(500);
+    if (!await page.evaluate(() => window.BB.canvas.isPicking())) {
+      throw new Error('looking around dropped out of link mode');
+    }
+    const reachable = await page.evaluate((id) => {
+      const n = document.querySelector(`.bubble[data-id="${id}"]`);
+      if (!n || !n.classList.contains('is-target')) return false;
+      const r = n.getBoundingClientRect();
+      const vp = document.querySelector('#viewport').getBoundingClientRect();
+      const banner = document.querySelector('#peek').getBoundingClientRect();
+      return r.top > vp.top + 20 && r.bottom < banner.top - 10;
+    }, b.id);
+    if (!reachable) throw new Error(b.name + ' is not offered as a target after looking around');
+    await page.touchscreen.tap(...Object.values(await bubbleAt(b.id)));
+    await page.waitForTimeout(500);
+    if (!await page.isVisible('.peek-ask')) throw new Error('no chooser after picking a target');
+    await page.tap('.peek-choice:first-child');
+    await page.waitForTimeout(600);
+    const now = await page.evaluate(() => Object.keys(window.BB.store.doc.links).length);
+    if (now !== links + 1) throw new Error('links ' + links + ' -> ' + now);
+    await page.evaluate(() => window.BB.store.undo());
+    await page.waitForTimeout(350);
+  });
+
+  await step('a hold on a bubble picks the person up and carries them', async () => {
+    await shutSheets();
+    // A hold used to open the context menu, which fought every other gesture and
+    // hid per-person actions behind something nobody discovers. The card carries
+    // those now, so the hold can do what a hold does on every other phone app.
+    const id = await centre('Ruth');
+    const at = await bubbleAt(id);
+    const before = await page.evaluate((pid) => {
+      const p = window.BB.store.person(pid);
+      return { x: p.x, y: p.y, view: Math.round(window.BB.canvas.view.x) };
+    }, id);
+    await down(at.x, at.y);
+    await page.waitForTimeout(620);
+    if (!await page.isVisible('.bubble.is-lifted')) throw new Error('nothing was picked up after holding');
+    if (await page.isVisible('#context-menu')) throw new Error('a hold still opens the old menu');
+    for (const d of [30, 60, 90]) await move(at.x + d, at.y + d * 0.6);
+    await lift(at.x + 90, at.y + 54);
+    await page.waitForTimeout(450);
+    const after = await page.evaluate((pid) => {
+      const p = window.BB.store.person(pid);
+      return { x: p.x, y: p.y, view: Math.round(window.BB.canvas.view.x) };
+    }, id);
+    if (Math.abs(after.x - before.x) < 20) throw new Error('they did not move: ' + before.x + ' -> ' + after.x);
+    if (Math.abs(after.view - before.view) > 2) throw new Error('the canvas panned as well as carrying them');
+    await page.evaluate(() => window.BB.store.undo());
+    await page.waitForTimeout(350);
+  });
+
+  await step('a drag that starts on a bubble pans, and leaves them where they were', async () => {
+    await shutSheets();
+    // On a phone your finger lands on somebody constantly. Moving them by default
+    // meant you could not pan across a crowded board without wrecking it.
+    const id = await centre('Ruth');
+    const at = await bubbleAt(id);
+    const before = await page.evaluate((pid) => {
+      const p = window.BB.store.person(pid);
+      return { x: p.x, y: p.y, view: Math.round(window.BB.canvas.view.x) };
+    }, id);
+    await down(at.x, at.y);
+    for (const d of [12, 40, 80, 120]) await move(at.x - d, at.y);
+    await lift(at.x - 120, at.y);
+    await page.waitForTimeout(700);
+    const after = await page.evaluate((pid) => {
+      const p = window.BB.store.person(pid);
+      return { x: p.x, y: p.y, view: Math.round(window.BB.canvas.view.x) };
+    }, id);
+    if (after.x !== before.x || after.y !== before.y) throw new Error('the drag moved them to ' + after.x + ',' + after.y);
+    if (Math.abs(after.view - before.view) < 60) throw new Error('the canvas barely panned: ' + before.view + ' -> ' + after.view);
+  });
+
+  await step('a hold on empty canvas still opens its own menu', async () => {
+    await shutSheets();
+    const spot = await emptySpot();
+    if (!spot) throw new Error('no empty spot to hold');
+    await down(spot.x, spot.y);
+    await page.waitForTimeout(700);
+    if (!await page.isVisible('#context-menu')) throw new Error('no menu after holding empty canvas');
+    const txt = await page.textContent('#context-menu');
+    if (!/Add a person/.test(txt)) throw new Error('wrong menu: ' + txt.slice(0, 40));
+    await lift(spot.x, spot.y);
+    await page.keyboard.press('Escape');
+    await page.waitForTimeout(250);
+  });
+
+  await step('a flick keeps gliding after the finger leaves', async () => {
+    await shutSheets();
+    const spot = await emptySpot();
+    if (!spot) throw new Error('no empty spot to flick');
+    const parked = await page.evaluate(() => ({ ...window.BB.canvas.view }));
+    const flick = await page.evaluate(async ([px, py]) => {
+      const vp = document.querySelector('#viewport');
+      const fire = (type, x) => vp.dispatchEvent(new PointerEvent(type, {
+        pointerId: 1, pointerType: 'touch', isPrimary: true,
+        clientX: x, clientY: py, bubbles: true, button: 0,
+      }));
+      const before = window.BB.canvas.view.x;
+      fire('pointerdown', px);
+      for (let i = 1; i <= 6; i++) {
+        await new Promise(r => setTimeout(r, 14));
+        fire('pointermove', px - i * 22);
+      }
+      fire('pointerup', px - 132);
+      return { before: Math.round(before), at: Math.round(window.BB.canvas.view.x) };
+    }, [spot.x, spot.y]);
+    if (Math.abs(flick.at - flick.before) < 100) {
+      throw new Error('the flick did not even pan: ' + flick.before + ' -> ' + flick.at);
+    }
+    const atLift = flick.at;
+    await page.waitForTimeout(350);
+    const settled = await page.evaluate(() => Math.round(window.BB.canvas.view.x));
+    if (Math.abs(settled - atLift) < 15) {
+      throw new Error('the canvas stopped dead on lift: ' + atLift + ' -> ' + settled);
+    }
+    await page.evaluate((v) => window.BB.canvas.setView(v), parked);
+    await page.waitForTimeout(400);
   });
 
   await step('pinch zooms the canvas', async () => {

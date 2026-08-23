@@ -66,6 +66,8 @@
     -webkit-tap-highlight-color: transparent;
   }
   .peek.is-open { transform: none; }
+  /* Out of the way while a bubble is being carried — after .is-open, so it wins. */
+  .peek.is-away { transform: translateY(calc(100% + 14px)); }
 
   .peek-grip {
     flex: none; width: 38px; height: 4px; margin: 1px auto 0;

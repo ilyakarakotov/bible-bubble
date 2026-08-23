@@ -13,6 +13,7 @@
   let sheetClearedFor = null;
   let hideTimer = null;
   let swipedAt = 0;
+  let shownAt = 0;             // when this face of the card appeared
 
   const appEl = () => document.getElementById('app');
   const hasClass = (c) => { const a = appEl(); return !!a && a.classList.contains(c); };
@@ -21,8 +22,24 @@
   const onCanvas = () => hasClass('view-canvas');
   const nameOf = (id) => { const p = S.person(id); return (p && p.name) || 'Unnamed'; };
 
-  /** Swallow the tap that follows a swipe, so dismissing never also acts. */
-  const tap = (fn) => (e) => { if (Date.now() - swipedAt < 500) return; fn(e); };
+  /**
+   * Two taps this must never answer: the one that dismissed the card with a
+   * swipe, and the one that opened this face of it in the first place — a tap
+   * on a bubble down by the thumb lands again on whatever slides up under it.
+   */
+  const tap = (fn) => (e) => {
+    if (Date.now() - swipedAt < 500 || Date.now() - shownAt < 250) return;
+    fn(e);
+  };
+
+  /**
+   * Writing a class that is already right still rewrites the attribute, and
+   * that wakes the observer below — which would then write it again, forever.
+   */
+  function setClass(node, name, on) {
+    if (!node || node.classList.contains(name) === !!on) return;
+    node.classList.toggle(name, !!on);
+  }
 
   /* ---------- the card ---------- */
 
@@ -75,7 +92,8 @@
         action('details', 'people', 'Details', () => openDetails()),
         action('trace', 'trace', tracing ? 'Untrace' : 'Trace', () => BB.app.toggleTrace(p.id),
           { on: tracing, title: tracing ? 'Stop tracing this line' : 'Trace this line up and down' }),
-        action('link', 'link', 'Link', () => startPick(p.id), { title: 'Link ' + (p.name || 'this person') + ' to someone' }),
+        action('link', 'link', 'Link', () => startPick(p.id),
+          { title: 'Link ' + (p.name || 'this person') + ' to someone' }),
         action('more', null, 'More', (e) => {
           e.stopPropagation();                       // or the page click closes the menu again
           const r = e.currentTarget.getBoundingClientRect();
@@ -106,7 +124,9 @@
           el('strong', { text: 'Tap who to link ' + nameOf(from) + ' to' }),
           el('span', { text: 'Drag to look around · pinch to zoom' }),
         ]),
-        el('button.btn.peek-cancel', { type: 'button', text: 'Cancel', onclick: tap(() => C.endLinkMode()) }),
+        el('button.btn.peek-cancel', {
+          type: 'button', text: 'Cancel', onclick: tap(() => C.endLinkMode()),
+        }),
       ]),
     ];
   }
@@ -130,26 +150,34 @@
         row('Spouse of ' + a, () => { C.linkTo(from, to, 'right'); done(); }),
         row('Another kind of connection…', () => { done(); BB.app.addBond(from, to); }),
       ]),
-      el('button.btn.peek-cancel.wide', { type: 'button', text: 'Cancel', onclick: tap(() => C.endLinkMode()) }),
+      el('button.btn.peek-cancel.wide', {
+        type: 'button', text: 'Cancel', onclick: tap(() => C.endLinkMode()),
+      }),
     ];
   }
 
   /* ---------- showing and hiding ---------- */
   function paint() {
     if (mode === 'pick' && pick) { host.replaceChildren(...bannerFor(pick.from)); return; }
-    if (mode === 'choose' && pick && pick.to) { host.replaceChildren(...chooserFor(pick.from, pick.to)); return; }
+    if (mode === 'choose' && pick && pick.to) {
+      host.replaceChildren(...chooserFor(pick.from, pick.to));
+      return;
+    }
     const p = currentId && S.person(currentId);
     if (!p) { hide(); return; }
     host.replaceChildren(...cardFor(p));
   }
 
   function reveal() {
+    const face = mode || 'card';
+    if (host.hidden || host.dataset.face !== face) shownAt = Date.now();
+    host.dataset.face = face;
     clearTimeout(hideTimer);
     host.hidden = false;
-    host.classList.remove('mode-pick', 'mode-choose', 'mode-card');
-    host.classList.add('mode-' + (mode || 'card'));
+    ['card', 'pick', 'choose'].forEach(m => setClass(host, 'mode-' + m, face === m));
+    setClass(host, 'is-away', false);
     // A frame between unhiding and the class, or the slide-up never plays.
-    requestAnimationFrame(() => { if (!host.hidden) host.classList.add('is-open'); });
+    requestAnimationFrame(() => { if (!host.hidden) setClass(host, 'is-open', true); });
     setPeekHeight();
   }
 
@@ -159,7 +187,7 @@
       const a = appEl();
       if (!a) return;
       const h = host.hidden ? 0 : Math.round(host.getBoundingClientRect().height);
-      a.classList.toggle('peek-open', !host.hidden);
+      setClass(a, 'peek-open', !host.hidden);
       // On the root, not on #app: the toasts live outside #app and still need it.
       document.documentElement.style.setProperty('--peek-h', h + 'px');
     });
@@ -179,15 +207,14 @@
 
   function hide() {
     if (host.hidden) return;
-    host.classList.remove('is-open');
+    setClass(host, 'is-open', false);
     clearTimeout(hideTimer);
     hideTimer = setTimeout(() => {
       host.hidden = true;
       host.replaceChildren();
       setPeekHeight();
     }, 220);
-    const a = appEl();
-    if (a) a.classList.remove('peek-open');
+    setClass(appEl(), 'peek-open', false);
     clearedFor = null;
   }
 
@@ -246,7 +273,17 @@
 
     C.on('select', () => { dismissed = false; sync(); });
     C.on('trace', () => { if (isOpen() && mode === 'card') paint(); });
-    C.on('pick-start', ({ from }) => { pick = { from: from, to: null }; mode = 'pick'; currentId = from; paint(); reveal(); });
+    // Carrying someone across the canvas: the card ducks out of the way rather
+    // than swallowing the half of the screen you are dragging into.
+    C.on('lift', () => setClass(host, 'is-away', true));
+    C.on('drop', () => setClass(host, 'is-away', false));
+    C.on('pick-start', ({ from }) => {
+      pick = { from: from, to: null };
+      mode = 'pick'; currentId = from;
+      paint(); reveal();
+      // You cannot aim from behind the banner.
+      requestAnimationFrame(() => C.keepVisible(from, { bottom: coverBy(host) }));
+    });
     C.on('pick-target', ({ from, to }) => {
       pick = { from: from, to: to };
       mode = 'choose';
@@ -258,36 +295,48 @@
 
     S.on('change', (p) => {
       if (p.reason === 'positions') return;
-      if (currentId && !S.person(currentId)) { currentId = null; mode = mode === 'card' ? null : mode; hide(); return; }
+      if (currentId && !S.person(currentId)) {          // deleted out from under us
+        currentId = null;
+        if (mode === 'card') mode = null;
+        hide();
+        return;
+      }
       if (isOpen() && mode === 'card') paint();
     });
 
     // The sheets and the view live on #app's class list; watching it saves
-    // every other module from having to tell us.
-    let wasSheet = sheetOpen();
+    // every other module from having to tell us. Only the four classes we care
+    // about count — anything else is noise, and reacting to our own writes
+    // would put the observer in a loop with itself.
+    const state = () =>
+      [isPhone(), onCanvas(), hasClass('panel-details'), hasClass('panel-lineage')].join('|');
+    let was = state();
     new MutationObserver(() => {
-      const now = sheetOpen();
-      if (now !== wasSheet) {
-        wasSheet = now;
-        if (now) sheetClearedFor = null;
-      }
+      const now = state();
+      if (now === was) return;
+      const opened = sheetOpen();
+      was = now;
+      if (!opened) sheetClearedFor = null;
       sync();
-      if (now) clearSheet();
-      else sheetClearedFor = null;
+      if (opened) clearSheet();
     }).observe(appEl(), { attributes: true, attributeFilter: ['class'] });
 
     window.addEventListener('resize', () => { setPeekHeight(); }, { passive: true });
 
-    // swipe down to put it away
+    // Swipe down to put it away. The rest of the gesture is watched on the
+    // window, because a downward swipe leaves the card long before it is done —
+    // and capturing the pointer here would take the taps off the buttons.
     let sy = null;
-    host.addEventListener('pointerdown', (e) => { sy = e.pointerType === 'mouse' ? null : e.clientY; }, { passive: true });
-    host.addEventListener('pointermove', (e) => {
+    host.addEventListener('pointerdown', (e) => {
+      sy = e.pointerType === 'mouse' ? null : e.clientY;
+    }, { passive: true });
+    window.addEventListener('pointermove', (e) => {
       if (sy == null) return;
       if (e.clientY - sy > 44) { sy = null; swipedAt = Date.now(); dismiss(); }
     }, { passive: true });
     const letGo = () => { sy = null; };
-    host.addEventListener('pointerup', letGo, { passive: true });
-    host.addEventListener('pointercancel', letGo, { passive: true });
+    window.addEventListener('pointerup', letGo, { passive: true });
+    window.addEventListener('pointercancel', letGo, { passive: true });
 
     sync();
   }

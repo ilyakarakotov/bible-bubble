@@ -7,6 +7,13 @@
   const MIN_K = 0.08, MAX_K = 3;
   const GRID = 24;
   const DRAG_SLOP = 4;
+  const LIFT_MS = 380;            // hold this long on a bubble to pick it up
+  const MENU_MS = 480;            // hold this long on empty canvas or a link for its menu
+  const TAP_SLOP = 7;             // how far outside a bubble a fingertip still counts
+  const FLING_MIN = 0.09;         // px/ms below which a lift is a stop, not a throw
+
+  const phoneQuery = window.matchMedia('(max-width: 700px)');
+  const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)');
 
   let viewport, world, nodesHost, edgesG, draftSvg, draftPath, marqueeEl, emptyState;
   let S, L;
@@ -53,7 +60,9 @@
     viewport.style.setProperty('--grid-size', g + 'px');
     viewport.style.setProperty('--grid-x', (view.x % g) + 'px');
     viewport.style.setProperty('--grid-y', (view.y % g) + 'px');
-    viewport.classList.toggle('zoom-far', view.k < 0.5);
+    // A phone screen is a third the width: bubbles turn to grey mush sooner, so
+    // the point at which they shed their detail comes sooner too.
+    viewport.classList.toggle('zoom-far', view.k < (phoneQuery.matches ? 0.62 : 0.5));
     drawMinimap();
     emit('view', view);
   });
@@ -80,6 +89,7 @@
   let animHandle = null;
   function animateTo(target, ms) {
     cancelAnimationFrame(animHandle);
+    stopGlide();
     const from = { x: view.x, y: view.y, k: view.k };
     const dur = ms == null ? 320 : ms;
     if (!dur) { setView(target); return; }
@@ -305,6 +315,7 @@
       node.style.top = p.y + 'px';
     });
     paintSelection();
+    paintPicking();
   }
 
   function edgeGeometry(link) {
@@ -488,54 +499,176 @@
   });
   let minimapMap = null;
 
+  /* ---------- momentum ---------- */
+  /**
+   * A flick should coast to a stop. We keep the last handful of samples rather
+   * than the final delta, because the frame right before a lift is often a slow
+   * one and taking it alone kills the throw.
+   */
+  let panSamples = [];
+  let glide = null;
+
+  function stopGlide() { if (glide) { cancelAnimationFrame(glide.raf); glide = null; } }
+
+  function startGlide() {
+    const samples = panSamples;
+    panSamples = [];
+    if (reduceMotion.matches || samples.length < 2) return;
+    const now = performance.now();
+    const recent = samples.filter(s => now - s.t < 110);
+    if (recent.length < 2) return;
+    const a = recent[0], b = recent[recent.length - 1];
+    const dt = b.t - a.t;
+    if (dt <= 0) return;
+    let vx = U.clamp((b.x - a.x) / dt, -4, 4);
+    let vy = U.clamp((b.y - a.y) / dt, -4, 4);
+    if (Math.hypot(vx, vy) < FLING_MIN) return;
+    let last = now;
+    const step = (t) => {
+      const d = Math.min(34, t - last);
+      last = t;
+      setView({ x: view.x + vx * d, y: view.y + vy * d }, { transient: true });
+      const decay = Math.exp(-d / 260);
+      vx *= decay; vy *= decay;
+      if (!glide) return;                          // something else took the wheel
+      if (Math.hypot(vx, vy) < 0.02) { glide = null; saveView(); return; }
+      glide.raf = requestAnimationFrame(step);
+    };
+    glide = { raf: requestAnimationFrame(step) };
+  }
+
   /* ---------- pointer interaction ---------- */
   let drag = null;
-  let longPress = null;      // touch has no right-click, so hold to open the menu
+  let longPress = null;      // empty canvas and links have no other route to a menu
+  let lift = null;           // hold on a bubble to pick it up
+  let picking = null;        // {from} — two-tap linking, the phone's answer to a hairline
+  let lastTap = 0, lastTapAt = null, touchDoubleAt = 0;
 
-  function armLongPress(e) {
+  const buzz = (ms) => { if (navigator.vibrate) { try { navigator.vibrate(ms); } catch (_) {} } };
+  /** Capturing a pointer the browser has already let go of throws. */
+  const capture = (e) => { try { viewport.setPointerCapture(e.pointerId); } catch (_) {} };
+
+  /**
+   * A fingertip covers far more than the one pixel it reports, so a touch that
+   * lands just outside a bubble — or beside a link, which is a hairline once the
+   * world is scaled down — still counts as a hit. The mouse gets no such help.
+   */
+  function hitAt(e) {
+    const closest = (sel) => (e.target && e.target.closest ? e.target.closest(sel) : null);
+    const hit = { handle: closest('.b-handle'), bubble: closest('.bubble'), edge: closest('.edge'), near: false };
+    if (e.pointerType !== 'touch' || hit.bubble || hit.edge) return hit;
+    const r = TAP_SLOP;
+    const ring = [[r, 0], [-r, 0], [0, r], [0, -r], [r, r], [-r, -r], [r, -r], [-r, r]];
+    let edge = null;
+    for (let i = 0; i < ring.length; i++) {
+      const n = document.elementFromPoint(e.clientX + ring[i][0], e.clientY + ring[i][1]);
+      if (!n || !n.closest) continue;
+      const b = n.closest('.bubble');
+      if (b) { hit.bubble = b; hit.near = true; return hit; }
+      if (!edge) edge = n.closest('.edge');
+    }
+    if (edge) { hit.edge = edge; hit.near = true; }
+    return hit;
+  }
+
+  function armLongPress(e, hit) {
     cancelLongPress();
-    if (e.pointerType !== 'touch') return;
+    if (e.pointerType !== 'touch' || picking) return;
+    if (hit.bubble) return;                          // a person's menu lives on the peek card now
     const { clientX, clientY } = e;
-    const target = e.target.closest('.bubble');
-    const edge = e.target.closest('.edge');
+    const edge = hit.edge;
     longPress = setTimeout(() => {
       longPress = null;
-      drag = null;                                   // abandon the pan/move this would have been
+      drag = null;                                   // abandon the pan this would have been
       viewport.classList.remove('is-panning');
-      if (navigator.vibrate) { try { navigator.vibrate(12); } catch (_) {} }
+      buzz(12);
       emit('context', {
         x: clientX, y: clientY,
-        id: target ? target.dataset.id : null,
+        id: null,
         link: edge ? edge.dataset.id : null,
         at: toWorld(clientX, clientY),
       });
-    }, 480);
+    }, MENU_MS);
   }
   function cancelLongPress() {
     if (longPress) { clearTimeout(longPress); longPress = null; }
   }
 
+  /**
+   * Pan-first: a finger that lands on someone still drags the canvas, because
+   * that is what dragging a map means. Holding still picks the person up.
+   */
+  function armLift(e, bubble) {
+    cancelLift();
+    if (e.pointerType !== 'touch' || !bubble || picking) return;
+    const id = bubble.dataset.id;
+    lift = setTimeout(() => {
+      lift = null;
+      if (!drag || drag.moved || drag.mode !== 'pan') return;
+      pickUp(id);
+    }, LIFT_MS);
+  }
+  function cancelLift() { if (lift) { clearTimeout(lift); lift = null; } }
+
+  function pickUp(id) {
+    if (!S.doc.people[id]) return;
+    if (!selection.has(id)) select([id]);
+    const ids = selection.has(id) ? Array.from(selection) : [id];
+    drag = {
+      mode: 'move', id, ids, lifted: true,
+      sx: drag.sx, sy: drag.sy, moved: false,
+      origin: ids.reduce((m, pid) => {
+        const p = S.doc.people[pid];
+        if (p) m[pid] = { x: p.x, y: p.y };
+        return m;
+      }, {}),
+    };
+    viewport.classList.remove('is-panning');
+    ids.forEach(pid => {
+      const n = nodeEls.get(pid);
+      if (n) n.classList.add('is-dragging', 'is-lifted');
+    });
+    buzz(12);
+    emit('lift', { id, ids });
+  }
+
   function onPointerDown(e) {
     if (e.button === 2) return;                       // context menu handles right-click
-    const handle = e.target.closest('.b-handle');
-    const bubble = e.target.closest('.bubble');
-    const edge = e.target.closest('.edge');
+    stopGlide();
+    const hit = hitAt(e);
+    const bubble = hit.bubble;
     const start = { sx: e.clientX, sy: e.clientY, moved: false };
+    const asPan = () => Object.assign({ mode: 'pan', vx: view.x, vy: view.y }, start);
 
-    if (handle && bubble) {
+    // While picking a link target, tapping is the whole gesture — but a drag has
+    // to keep panning, or you cannot go and find whoever you meant to link to.
+    if (picking) {
+      drag = Object.assign(asPan(), { holdId: bubble ? bubble.dataset.id : null, near: hit.near });
+      capture(e);
+      e.preventDefault();
+      return;
+    }
+
+    if (hit.handle && bubble) {
       const from = bubble.dataset.id;
-      drag = { mode: 'link', from, side: handle.dataset.handle, ...start };
-      handle.classList.add('is-live');
-      drag.handleEl = handle;
+      drag = Object.assign({ mode: 'link', from, side: hit.handle.dataset.handle }, start);
+      hit.handle.classList.add('is-live');
+      drag.handleEl = hit.handle;
       document.getElementById('app').classList.add('is-linking');
-      viewport.setPointerCapture(e.pointerId);
+      capture(e);
       e.preventDefault();
       return;
     }
 
     if (bubble && !spaceDown && e.button === 0) {
-      armLongPress(e);
       const id = bubble.dataset.id;
+      if (e.pointerType === 'touch') {
+        drag = Object.assign(asPan(), { holdId: id, near: hit.near });
+        armLift(e, bubble);
+        capture(e);
+        e.preventDefault();
+        return;
+      }
       if (e.shiftKey || e.metaKey || e.ctrlKey) select([id], { add: true, toggle: true });
       else if (!selection.has(id)) select([id]);
       const ids = selection.has(id) ? Array.from(selection) : [id];
@@ -548,36 +681,45 @@
         }, {}),
       };
       ids.forEach(pid => nodeEls.get(pid) && nodeEls.get(pid).classList.add('is-dragging'));
-      viewport.setPointerCapture(e.pointerId);
+      capture(e);
       e.preventDefault();
       return;
     }
 
-    if (edge && e.button === 0 && !spaceDown) {
-      selectLink(edge.dataset.id);
+    if (hit.edge && e.button === 0 && !spaceDown) {
+      if (e.pointerType !== 'touch') { selectLink(hit.edge.dataset.id); return; }
+      armLongPress(e, hit);
+      drag = Object.assign(asPan(), { holdEdge: hit.edge.dataset.id, near: hit.near });
+      capture(e);
       return;
     }
 
     // background
-    armLongPress(e);
+    armLongPress(e, hit);
     if (e.button === 1 || spaceDown || !(e.shiftKey)) {
-      drag = { mode: 'pan', ...start, vx: view.x, vy: view.y };
+      drag = asPan();
       viewport.classList.add('is-panning');
     } else {
       const w = toWorld(e.clientX, e.clientY);
       drag = { mode: 'marquee', ...start, wx: w.x, wy: w.y, additive: e.metaKey || e.ctrlKey };
       marqueeEl.hidden = false;
     }
-    viewport.setPointerCapture(e.pointerId);
+    capture(e);
   }
 
   function onPointerMove(e) {
     if (!drag) return;
     const dx = e.clientX - drag.sx, dy = e.clientY - drag.sy;
     if (!drag.moved && Math.hypot(dx, dy) > DRAG_SLOP) drag.moved = true;
-    if (drag.moved) cancelLongPress();
+    if (drag.moved) { cancelLongPress(); cancelLift(); }
 
     if (drag.mode === 'pan') {
+      // A press that landed on a bubble or a link waits for the slop before it
+      // pans, so a tap never nudges the canvas out from under itself.
+      if (!drag.moved && (drag.holdId || drag.holdEdge)) return;
+      if (!drag.wasPan) { drag.wasPan = true; viewport.classList.add('is-panning'); }
+      panSamples.push({ t: performance.now(), x: e.clientX, y: e.clientY });
+      if (panSamples.length > 6) panSamples.shift();
       setView({ x: drag.vx + dx, y: drag.vy + dy }, { transient: true });
     } else if (drag.mode === 'move') {
       const wdx = dx / view.k, wdy = dy / view.k;
@@ -627,8 +769,37 @@
     }
   }
 
+  /** A touch that never travelled: select, link, add — never a pan. */
+  function tapUp(d, e) {
+    if (picking) {
+      if (d.holdId && d.holdId !== picking.from) emit('pick-target', { from: picking.from, to: d.holdId });
+      else endLinkMode();
+      return;
+    }
+    // A near miss still counts as a hit, but not so much that it swallows the
+    // double-tap that adds someone beside an existing bubble.
+    if (d.holdId && !d.near) { lastTap = 0; select([d.holdId]); return; }
+    if (d.holdEdge && !d.near) { lastTap = 0; selectLink(d.holdEdge); return; }
+
+    if (e.pointerType === 'touch') {
+      const now = Date.now();
+      const near = lastTapAt && Math.hypot(e.clientX - lastTapAt.x, e.clientY - lastTapAt.y) < 28;
+      if (now - lastTap < 320 && near) {
+        lastTap = 0;
+        touchDoubleAt = now;
+        emit('dblclick-empty', toWorld(e.clientX, e.clientY));
+        return;
+      }
+      lastTap = now; lastTapAt = { x: e.clientX, y: e.clientY };
+    }
+    if (d.holdId) { select([d.holdId]); return; }
+    if (d.holdEdge) { selectLink(d.holdEdge); return; }
+    if (!e.shiftKey) { select([]); selectedLink = null; paintSelection(); }
+  }
+
   function onPointerUp(e) {
     cancelLongPress();
+    cancelLift();
     if (!drag) return;
     const d = drag;
     drag = null;
@@ -636,10 +807,15 @@
     try { viewport.releasePointerCapture(e.pointerId); } catch (_) {}
 
     if (d.mode === 'pan') {
-      if (!d.moved && !e.shiftKey) { select([]); selectedLink = null; paintSelection(); }
+      if (!d.moved) tapUp(d, e);
+      else if (e.pointerType === 'touch') startGlide();
       saveView();
     } else if (d.mode === 'move') {
-      d.ids.forEach(pid => nodeEls.get(pid) && nodeEls.get(pid).classList.remove('is-dragging'));
+      d.ids.forEach(pid => {
+        const n = nodeEls.get(pid);
+        if (n) n.classList.remove('is-dragging', 'is-lifted');
+      });
+      if (d.lifted) emit('drop', { id: d.id, ids: d.ids, moved: !!d.moved });
       if (d.moved) {
         const positions = {};
         d.ids.forEach(pid => { const p = S.doc.people[pid]; if (p) positions[pid] = { x: p.x, y: p.y }; });
@@ -668,8 +844,80 @@
     }
   }
 
+  /* ---------- two-tap linking ---------- */
+  /**
+   * Dragging a hairline out of a 30px handle is a mouse gesture. On a phone you
+   * tap Link, then tap whoever it goes to; the chooser that follows routes the
+   * answer back through the very same 'link-drop' the handle drag ends with.
+   */
+  function linkMode(fromId) {
+    if (!S.doc.people[fromId]) return false;
+    cancelLift(); cancelLongPress(); stopGlide();
+    picking = { from: fromId };
+    paintPicking();
+    emit('pick-start', { from: fromId });
+    return true;
+  }
+  function endLinkMode() {
+    if (!picking) return;
+    const from = picking.from;
+    picking = null;
+    paintPicking();
+    emit('pick-end', { from });
+  }
+  const isPicking = () => !!picking;
+  const linkTo = (from, to, side) => emit('link-drop', { from, to, side });
+
+  function paintPicking() {
+    const on = !!picking;
+    viewport.classList.toggle('is-picking', on);
+    nodeEls.forEach((node, id) => {
+      node.classList.toggle('is-target', on && id !== picking.from);
+      node.classList.toggle('is-source', on && id === picking.from);
+    });
+  }
+
+  /** The menu a long-press used to open, from wherever the caller wants it. */
+  function contextAt(x, y, id) {
+    emit('context', { x, y, id: id || null, link: null, at: toWorld(x, y) });
+  }
+
+  /**
+   * Slide the view so a person clears whatever is covering the canvas — the
+   * details sheet, the peek card — without changing the zoom. Never while a
+   * finger is down: nothing is worse than the map moving mid-drag.
+   */
+  function keepVisible(id, opts) {
+    const o = opts || {};
+    if (drag) return false;
+    const p = S.doc.people[id];
+    if (!p) return false;
+    const r = viewport.getBoundingClientRect();
+    const rect = rectOf(p);
+    const s = toScreen(rect.x, rect.y);
+    const w = rect.w * view.k, h = rect.h * view.k;
+    const pad = o.pad == null ? 14 : o.pad;
+    const top = (o.top || 0) + pad;
+    const bottom = r.height - (o.bottom || 0) - pad;
+    let dy = 0;
+    // A bubble taller than the strip cannot fit: show its head, where the name
+    // is, rather than centring it and losing the name off the top.
+    if (h >= bottom - top) dy = top - s.y;
+    else if (s.y + h > bottom) dy = bottom - (s.y + h);
+    else if (s.y < top) dy = top - s.y;
+    let dx = 0;
+    if (w >= r.width - pad * 2) dx = r.width / 2 - (s.x + w / 2);
+    else if (s.x + w > r.width - pad) dx = (r.width - pad) - (s.x + w);
+    else if (s.x < pad) dx = pad - s.x;
+    if (!dx && !dy) return false;
+    animateTo({ x: view.x + dx, y: view.y + dy, k: view.k },
+      reduceMotion.matches || o.animate === false ? 0 : 300);
+    return true;
+  }
+
   function onWheel(e) {
     e.preventDefault();
+    stopGlide();
     const pref = S.prefs().wheel || 'zoom';
     const wantZoom = e.ctrlKey || e.metaKey ||
       (pref === 'zoom' ? Math.abs(e.deltaX) < 1 : false);
@@ -694,8 +942,12 @@
       const [a, b] = Array.from(touches.values());
       const dist = Math.hypot(a.x - b.x, a.y - b.y);
       const mid = { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };
-      if (!pinch) { pinch = { dist, mid }; drag = null; cancelLongPress(); viewport.classList.remove('is-panning'); }
-      else if (phase === 'move') {
+      if (!pinch) {
+        pinch = { dist, mid };
+        drag = null; panSamples = [];
+        cancelLongPress(); cancelLift(); stopGlide();
+        viewport.classList.remove('is-panning');
+      } else if (phase === 'move') {
         if (pinch.dist > 0) zoomAt(dist / pinch.dist, mid.x, mid.y);
         setView({ x: view.x + (mid.x - pinch.mid.x), y: view.y + (mid.y - pinch.mid.y) }, { transient: true });
         pinch = { dist, mid };
@@ -722,7 +974,6 @@
     viewport.addEventListener('pointerup', (e) => { trackTouch(e, 'up'); onPointerUp(e); });
     viewport.addEventListener('pointercancel', (e) => { trackTouch(e, 'up'); onPointerUp(e); });
     viewport.addEventListener('wheel', onWheel, { passive: false });
-    let lastTap = 0, lastTapAt = null, touchDoubleAt = 0;
     viewport.addEventListener('dblclick', (e) => {
       if (e.target.closest('.bubble') || e.target.closest('.edge')) return;
       // Touch browsers synthesise dblclick on top of our own double-tap; taking
@@ -730,22 +981,6 @@
       if (Date.now() - touchDoubleAt < 700) return;
       emit('dblclick-empty', toWorld(e.clientX, e.clientY));
     });
-    // Touch: a quick double-tap on empty canvas adds a person, since synthetic
-    // dblclick does not reliably survive `touch-action: none`.
-    viewport.addEventListener('pointerup', (e) => {
-      if (e.pointerType !== 'touch') return;
-      if (e.target.closest('.bubble') || e.target.closest('.edge') || e.target.closest('.b-handle')) { lastTap = 0; return; }
-      const now = Date.now();
-      const near = lastTapAt && Math.hypot(e.clientX - lastTapAt.x, e.clientY - lastTapAt.y) < 28;
-      if (now - lastTap < 320 && near) {
-        lastTap = 0;
-        touchDoubleAt = now;
-        emit('dblclick-empty', toWorld(e.clientX, e.clientY));
-      } else {
-        lastTap = now; lastTapAt = { x: e.clientX, y: e.clientY };
-      }
-    });
-
     viewport.addEventListener('contextmenu', (e) => {
       e.preventDefault();
       const bubble = e.target.closest('.bubble');
@@ -760,6 +995,7 @@
 
     window.addEventListener('keydown', (e) => {
       if (e.code === 'Space' && !isTyping(e.target)) { spaceDown = true; viewport.classList.add('is-space'); }
+      else if (e.key === 'Escape' && picking) endLinkMode();
     });
     window.addEventListener('keyup', (e) => {
       if (e.code === 'Space') { spaceDown = false; viewport.classList.remove('is-space'); }
@@ -770,6 +1006,7 @@
     const mini = $('#minimap');
     mini.addEventListener('pointerdown', (e) => {
       if (!minimapMap) return;
+      stopGlide();
       const r = mini.getBoundingClientRect();
       const { b, k, ox, oy } = minimapMap;
       const wx = b.x + (e.clientX - r.left - ox) / k;
@@ -803,6 +1040,8 @@
     get selection() { return selection; },
     invalidateSizes: () => sizeCache.clear(),
     isTyping,
+    contextAt, keepVisible, linkMode, endLinkMode, isPicking, linkTo,
+    isDragging: () => !!drag,
     MIN_K, MAX_K,
   };
 })(window.BB);
