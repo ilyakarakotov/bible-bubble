@@ -5,11 +5,13 @@
   const { $, el } = U;
 
   const ROW_H = 24;
+  const ROW_H_TOUCH = 30;   // a row a finger can hit without hitting its neighbour
   const TOP = 58;           // axis (38) + era band (20)
   const NICE = [1, 2, 5, 10, 20, 25, 50, 100, 200, 250, 500, 1000, 2000];
 
   let S, L, C;
   let root, scroller, canvasEl, axisEl, erasEl, rowsEl, namesEl, namesInner, scrubEl, aliveEl, undatedEl;
+  let optsEl, optsBtn;
   let ppy = 1;              // pixels per year
   let mode = 'years';
   let colorBy = 'era';
@@ -18,6 +20,35 @@
   let scrubYear = null;
   let built = false;
   let visible = false;
+  let draggedAt = 0;        // when the names column was last dragged, not tapped
+
+  const PHONE = window.matchMedia('(max-width: 700px)');
+  const isPhone = () => PHONE.matches;
+  const rowH = () => (isPhone() ? ROW_H_TOUCH : ROW_H);
+
+  /**
+   * Tap to pick someone out, tap them again to open them. Every name is already
+   * written down the side here, so throwing a 70vh sheet over the chart at the
+   * first touch would cost more than it told anyone.
+   */
+  function pickRow(id) {
+    const sel = C.selected();
+    const again = sel.length === 1 && sel[0] === id;
+    C.select([id]);
+    draw();
+    if (again) surface(id);
+  }
+
+  /** Put a tapped person in front of the reader, as the other views now do. */
+  function surface(id) {
+    if (!isPhone()) return;
+    if (BB.peek && typeof BB.peek.show === 'function') {
+      BB.peek.show(id);
+      if (BB.peek.isOpen && BB.peek.isOpen()) return;
+    }
+    if (BB.inspector && typeof BB.inspector.show === 'function') BB.inspector.show(id);
+    else if (BB.app && typeof BB.app.setPanel === 'function') BB.app.setPanel('details', true);
+  }
 
   /* ---------- data ---------- */
   function collect() {
@@ -99,9 +130,10 @@
       return;
     }
 
+    const RH = rowH();
     const width = data.span ? Math.max(scroller.clientWidth, (data.span.max - data.span.min) * ppy + 160) : scroller.clientWidth;
     canvasEl.style.width = width + 'px';
-    canvasEl.style.height = (TOP + data.rows.length * ROW_H + 40) + 'px';
+    canvasEl.style.height = (TOP + data.rows.length * RH + 40) + 'px';
 
     /* axis */
     if (mode === 'years' && data.span) {
@@ -148,7 +180,7 @@
     const sel = new Set(C.selected());
     const bars = [], names = [];
     data.rows.forEach((r, i) => {
-      const top = TOP + i * ROW_H + 3;
+      const top = TOP + i * RH + (RH - 17) / 2;
       let left, w;
       if (mode === 'generations') {
         left = r.gen * (data.colW || 60);
@@ -170,7 +202,7 @@
       bars.push(bar);
 
       names.push(el('div.tl-name-row' + (sel.has(r.p.id) ? '.is-sel' : ''), {
-        style: { top: (TOP + i * ROW_H) + 'px', height: ROW_H + 'px' },
+        style: { top: (TOP + i * RH) + 'px', height: RH + 'px' },
         'data-id': r.p.id, title: r.p.name || 'Unnamed',
       }, [
         el('span.tree-dot', { style: { background: barColor(r) } }),
@@ -183,7 +215,7 @@
     bars.forEach(b => rowsEl.appendChild(b));
     rowsEl.style.top = '0px';
     namesInner.replaceChildren(...names);
-    namesInner.style.height = (TOP + data.rows.length * ROW_H + 40) + 'px';
+    namesInner.style.height = (TOP + data.rows.length * RH + 40) + 'px';
 
     drawScrubber(data);
     drawUndated(data);
@@ -198,7 +230,7 @@
     scrubYear = U.clamp(scrubYear, data.span.min, data.span.max);
     const st = S.settings();
     scrubEl.style.left = xOf(scrubYear, data) + 'px';
-    scrubEl.style.height = (TOP + data.rows.length * ROW_H) + 'px';
+    scrubEl.style.height = (TOP + data.rows.length * rowH()) + 'px';
     $('#tl-scrub-handle').textContent = st.yearMode === 'am'
       ? 'AM ' + Math.round(scrubYear)
       : U.amToEra(Math.round(scrubYear), st.anchor);
@@ -232,6 +264,18 @@
     );
   }
 
+  /**
+   * Switched on, the scrubber went to the middle of the whole span — which on a
+   * phone is usually a screen or two off to the side. Start it in the middle of
+   * what is actually on screen instead.
+   */
+  function centreScrub() {
+    const data = collect();
+    if (!data.span) return;
+    scrubYear = U.clamp(yearAt(scroller.scrollLeft + scroller.clientWidth / 2, data),
+      data.span.min, data.span.max);
+  }
+
   /* ---------- events ---------- */
   function bindScrubDrag() {
     const handle = $('#tl-scrub-handle');
@@ -245,10 +289,17 @@
       drawScrubber(data);
     };
     handle.addEventListener('pointerdown', (e) => {
-      dragging = true; handle.setPointerCapture(e.pointerId); e.preventDefault(); e.stopPropagation();
+      dragging = true;
+      // Capture keeps the drag alive past the edge of the handle, but a pointer
+      // that has already been let go of throws rather than declining.
+      try { handle.setPointerCapture(e.pointerId); } catch (_) {}
+      e.preventDefault(); e.stopPropagation();
     });
     handle.addEventListener('pointermove', move);
-    handle.addEventListener('pointerup', (e) => { dragging = false; try { handle.releasePointerCapture(e.pointerId); } catch (_) {} });
+    handle.addEventListener('pointerup', (e) => {
+      dragging = false;
+      try { handle.releasePointerCapture(e.pointerId); } catch (_) {}
+    });
     // click anywhere on the canvas to move the scrubber
     canvasEl.addEventListener('click', (e) => {
       if (!scrubOn || e.target.closest('.tl-bar')) return;
@@ -257,6 +308,91 @@
       const r = canvasEl.getBoundingClientRect();
       scrubYear = U.clamp(yearAt(e.clientX - r.left, data), data.span.min, data.span.max);
       drawScrubber(data);
+    });
+  }
+
+  /**
+   * The names are a mirror of the scroller rather than a scroller themselves,
+   * so a finger dragging them had nothing to move and the list sat still.
+   * Carry the drag across by hand.
+   */
+  function bindNameDrag() {
+    let y0 = null, from = 0, moved = false;
+    namesEl.addEventListener('touchstart', (e) => {
+      if (e.touches.length !== 1) { y0 = null; return; }
+      y0 = e.touches[0].clientY; from = scroller.scrollTop; moved = false;
+    }, { passive: true });
+    namesEl.addEventListener('touchmove', (e) => {
+      if (y0 == null) return;
+      const dy = e.touches[0].clientY - y0;
+      if (!moved && Math.abs(dy) < 5) return;
+      moved = true;
+      draggedAt = Date.now();
+      scroller.scrollTop = from - dy;
+      e.preventDefault();
+    }, { passive: false });
+    const letGo = () => { if (moved) draggedAt = Date.now(); y0 = null; };
+    namesEl.addEventListener('touchend', letGo);
+    namesEl.addEventListener('touchcancel', letGo);
+  }
+
+  /* ---------- the toolbar on a phone ---------- */
+  /**
+   * Seven controls will not sit on a 390px row, and the two that matter while
+   * reading — the mode and the zoom — were the ones scrolled out of sight. The
+   * three that are set once move behind a button.
+   */
+  const stowable = [];
+  let stowed = null;
+
+  function buildOpts() {
+    const bar = root.querySelector('.tl-toolbar');
+    if (!bar) return;
+    optsEl = el('div.tl-opts', { hidden: true });
+    root.appendChild(optsEl);
+    optsBtn = el('button.btn.sm.ghost.tl-opts-btn', {
+      type: 'button', text: 'Options', 'aria-expanded': 'false',
+      onclick: (e) => { e.stopPropagation(); showOpts(optsEl.hidden); },
+    });
+    bar.insertBefore(optsBtn, bar.querySelector('.tl-spacer'));
+    ['#tl-color', '#tl-only-dated', '#tl-scrub'].forEach(sel => {
+      const wrap = $(sel) && $(sel).closest('label');
+      if (wrap && wrap.parentNode) stowable.push({ wrap: wrap, home: wrap.parentNode, after: wrap.nextSibling });
+    });
+    document.addEventListener('pointerdown', (e) => {
+      if (!optsEl || optsEl.hidden) return;
+      if (e.target.closest('.tl-opts') || e.target.closest('.tl-opts-btn')) return;
+      showOpts(false);
+    });
+    document.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape' && optsEl && !optsEl.hidden) showOpts(false);
+    });
+  }
+
+  function showOpts(on) {
+    if (!optsEl) return;
+    optsEl.hidden = !on;
+    if (optsBtn) optsBtn.setAttribute('aria-expanded', String(!!on));
+    if (!on) return;
+    const bar = root.querySelector('.tl-toolbar');
+    optsEl.style.top = ((bar ? bar.offsetHeight : 52) + 5) + 'px';
+  }
+
+  function layoutControls() {
+    const phone = isPhone();
+    if (phone === stowed) return;
+    stowed = phone;
+    if (phone && optsEl) {
+      stowable.forEach(st => optsEl.appendChild(st.wrap));
+    } else {
+      // Back to front, so each control still has its old neighbour to go before.
+      for (let i = stowable.length - 1; i >= 0; i--) stowable[i].home.insertBefore(stowable[i].wrap, stowable[i].after);
+      showOpts(false);
+    }
+    U.$$('[data-tlmode]', root).forEach(b => {
+      const long = b.dataset.tlmode === 'years' ? 'By year' : 'By generation';
+      const short = b.dataset.tlmode === 'years' ? 'Years' : 'Generations';
+      b.textContent = phone ? short : long;
     });
   }
 
@@ -284,16 +420,15 @@
 
     rowsEl.addEventListener('click', (e) => {
       const bar = e.target.closest('.tl-bar');
-      if (!bar) return;
-      C.select([bar.dataset.id]);
-      draw();
+      if (bar) pickRow(bar.dataset.id);
     });
     namesEl.addEventListener('click', (e) => {
       const row = e.target.closest('.tl-name-row');
       if (!row) return;
-      C.select([row.dataset.id]);
-      draw();
+      if (Date.now() - draggedAt < 400) return;   // that was a scroll, not a tap
+      pickRow(row.dataset.id);
     });
+    bindNameDrag();
     rowsEl.addEventListener('dblclick', (e) => {
       const bar = e.target.closest('.tl-bar');
       if (bar) BB.app.revealPerson(bar.dataset.id);
@@ -306,7 +441,11 @@
     }));
     $('#tl-color').addEventListener('change', (e) => { colorBy = e.target.value; draw(); });
     $('#tl-only-dated').addEventListener('change', (e) => { onlyDated = e.target.checked; draw(); });
-    $('#tl-scrub').addEventListener('change', (e) => { scrubOn = e.target.checked; draw(); });
+    $('#tl-scrub').addEventListener('change', (e) => {
+      scrubOn = e.target.checked;
+      if (scrubOn) centreScrub();
+      draw();
+    });
 
     document.addEventListener('click', (e) => {
       const act = e.target.closest('[data-act]');
@@ -317,6 +456,11 @@
     });
 
     bindScrubDrag();
+    buildOpts();
+    layoutControls();
+    const onWidth = () => { layoutControls(); if (visible) draw(); };
+    if (PHONE.addEventListener) PHONE.addEventListener('change', onWidth);
+    else if (PHONE.addListener) PHONE.addListener(onWidth);
 
     S.on('change', (p) => { if (p.reason !== 'positions') draw(); });
     C.on('select', () => { if (visible) draw(); });

@@ -19,13 +19,58 @@
     setTimeout(() => { a.remove(); URL.revokeObjectURL(url); }, 400);
   }
 
+  /* ---------- handing the file over ---------- */
+  /**
+   * A download inside an installed app on iOS lands somewhere the reader cannot
+   * see, and there is no downloads shelf to tell them it happened. Where the
+   * device can take a file, hand it to the share sheet instead — "Save to
+   * Files" is in there next to every app they might send it to. Everywhere else
+   * — desktop, file:// — none of this exists and the download runs as before.
+   */
+  let shareable = null;
+  function canShare() {
+    if (shareable !== null) return shareable;
+    shareable = false;
+    try {
+      if (typeof File === 'function' && navigator.share && navigator.canShare) {
+        shareable = !!navigator.canShare({ files: [new File(['{}'], 'probe.json', { type: 'application/json' })] });
+      }
+    } catch (_) { shareable = false; }
+    return shareable;
+  }
+
+  /** A phone, or the app installed on one: the two places a download is no use. */
+  const handheld = () => !!((BB.app && BB.app.isPhone && BB.app.isPhone()) ||
+    (BB.pwa && BB.pwa.isStandalone && BB.pwa.isStandalone()));
+
+  function deliver(filename, text, mime, note, always) {
+    const fallback = () => { download(filename, text, mime); if (note) U.toast(note); };
+    if (!canShare() || !(always || handheld())) { fallback(); return; }
+    let shared;
+    try {
+      shared = navigator.share({
+        files: [new File([text], filename, { type: mime })],
+        title: (S.doc && S.doc.name) || 'Bible Bubble',
+      });
+    } catch (_) { fallback(); return; }
+    Promise.resolve(shared).catch((err) => {
+      // Cancelling the sheet is an answer, not a failure. Anything else — no
+      // gesture left, a target that refuses files — falls back to the file.
+      if (err && err.name === 'AbortError') return;
+      fallback();
+    });
+  }
+
   /* ---------- JSON ---------- */
-  function exportJSON() {
+  function exportJSON(always) {
     const doc = U.deepClone(S.doc);
     const payload = Object.assign({ app: 'bible-bubble', exported: new Date().toISOString() }, doc);
-    download(`${slug(doc.name)}-${stamp()}.json`, JSON.stringify(payload, null, 2), 'application/json');
-    U.toast('Exported ' + U.plural(Object.keys(doc.people).length, 'person', 'people'));
+    deliver(`${slug(doc.name)}-${stamp()}.json`, JSON.stringify(payload, null, 2), 'application/json',
+      'Exported ' + U.plural(Object.keys(doc.people).length, 'person', 'people'), always === true);
   }
+
+  /** "Share this board" — the same file, offered to the share sheet first. */
+  const shareBoard = () => exportJSON(true);
 
   /**
    * Read a file the user picked. Returns a promise for the parsed object.
@@ -102,8 +147,7 @@
   }
 
   function exportMarkdown() {
-    download(`${slug(S.doc.name)}-${stamp()}.md`, toMarkdown(), 'text/markdown');
-    U.toast('Exported a Markdown outline');
+    deliver(`${slug(S.doc.name)}-${stamp()}.md`, toMarkdown(), 'text/markdown', 'Exported a Markdown outline');
   }
 
   /* ---------- CSV (one row per person) ---------- */
@@ -136,11 +180,13 @@
   }
 
   function exportCSV() {
-    download(`${slug(S.doc.name)}-${stamp()}.csv`, toCSV(), 'text/csv');
-    U.toast('Exported a spreadsheet');
+    deliver(`${slug(S.doc.name)}-${stamp()}.csv`, toCSV(), 'text/csv', 'Exported a spreadsheet');
   }
 
   function init() { S = BB.store; L = BB.lineage; }
 
-  BB.io = { init, exportJSON, exportMarkdown, exportCSV, readFile, toMarkdown, toCSV, download };
+  BB.io = {
+    init, exportJSON, exportMarkdown, exportCSV, readFile, toMarkdown, toCSV, download,
+    shareBoard, canShare,
+  };
 })(window.BB);

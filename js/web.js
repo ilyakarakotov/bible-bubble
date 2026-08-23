@@ -18,7 +18,7 @@
 
   /* ---------- dom ---------- */
   let root, stage, cv, ctx, tipEl, emptyEl, sideBtn, rankEl, pathA, pathB, pathOut;
-  let spreadEl, colorEl, labelsEl, isolatedEl;
+  let spreadEl, colorEl, labelsEl, isolatedEl, optsEl, sideHead;
 
   /* ---------- graph ---------- */
   let nodes = [], edges = [], byId = new Map(), adj = new Map();
@@ -26,18 +26,19 @@
 
   /* ---------- view + loop ---------- */
   const view = { x: 0, y: 0, k: 1 };
-  let alpha = 0, frame = 0, paintFrame = 0, tween = null;
+  let alpha = 0, frame = 0, paintFrame = 0, tween = null, lastTick = 0;
   let size = { w: 0, h: 0, dpr: 1 };
   let visible = false, dirty = true, ready = false, autoFit = true;
 
   /* ---------- interaction ---------- */
-  let hoverId = null, drag = null, pan = null, pendingFocus = null;
+  let hoverId = null, drag = null, pan = null, pendingFocus = null, wantSurface = null;
   let flashId = null, flashUntil = 0, follow = null;
   let pathState = null;           // {ids:Set, links:Set, hops, steps}
 
   const opts = { show: 'all', color: 'era', labels: 'hubs', spread: 120, isolated: true, side: true };
 
-  const isPhone = () => window.matchMedia('(max-width: 700px)').matches;
+  const PHONE = window.matchMedia('(max-width: 700px)');
+  const isPhone = () => PHONE.matches;
 
   /* ================= preferences ================= */
   function loadPrefs() {
@@ -47,7 +48,9 @@
     opts.show = oneOf(get('show'), ['all', 'lineage', 'bonds'], 'all');
     opts.color = oneOf(get('color'), ['era', 'generation', 'bubble', 'degree'], 'era');
     opts.labels = oneOf(get('labels'), ['hubs', 'all', 'none'], 'hubs');
-    opts.spread = U.clamp(+get('spread', 120) || 120, 40, 260);
+    // A tighter default on a phone: the whole web is fitted to the screen
+    // either way, so a closer layout is simply a larger circle per person.
+    opts.spread = U.clamp(+get('spread', isPhone() ? 95 : 120) || 120, 40, 260);
     opts.isolated = get('isolated', true) !== false;
     opts.side = get('side', !isPhone()) !== false;
   }
@@ -141,7 +144,7 @@
   }
 
   /* ================= the simulation ================= */
-  function tick() {
+  function tick(dt) {
     const spread = opts.spread;
 
     for (let i = 0; i < edges.length; i++) {
@@ -184,15 +187,23 @@
       }
     }
 
+    // A phone screen is twice as tall as it is wide, and a web that spreads
+    // evenly in every direction leaves half of it empty. Pull harder across the
+    // narrow axis so the layout grows into the shape it is being read in.
+    const aspect = (size.w && size.h) ? U.clamp(Math.pow(size.h / size.w, 1.15), 0.55, 2.3) : 1;
+    const cx = CENTER * aspect, cy = CENTER / aspect;
     for (let i = 0; i < nodes.length; i++) {
       const a = nodes[i];
-      a.vx -= a.x * CENTER * alpha;
-      a.vy -= a.y * CENTER * alpha;
+      a.vx -= a.x * cx * alpha;
+      a.vy -= a.y * cy * alpha;
       if (a.fx != null) { a.x = a.fx; a.y = a.fy; a.vx = 0; a.vy = 0; continue; }
       a.vx *= VELOCITY_DECAY; a.vy *= VELOCITY_DECAY;
       a.x += a.vx; a.y += a.vy;
     }
-    alpha *= ALPHA_DECAY;
+    // Decay against the clock rather than the frame count: a phone drawing at
+    // 30fps then settles in the same second a desktop does instead of grinding
+    // on for twice as long.
+    alpha *= Math.pow(ALPHA_DECAY, dt / 16.7);
     if (alpha < ALPHA_MIN) alpha = 0;
   }
 
@@ -200,9 +211,11 @@
     return alpha > 0 || !!tween || performance.now() < flashUntil;
   }
 
-  function loop() {
+  function loop(now) {
     frame = requestAnimationFrame(loop);
-    if (alpha > 0) tick();
+    const t = now || performance.now();
+    if (alpha > 0) tick(lastTick ? U.clamp(t - lastTick, 8, 50) : 16.7);
+    lastTick = t;
     if (follow) holdFollowed();
     if (tween) advanceTween();
     draw();
@@ -237,6 +250,7 @@
   function stopLoop() {
     if (frame) cancelAnimationFrame(frame);
     frame = 0;
+    lastTick = 0;
   }
   /** Warm the layout back up — after a drag, a filter change or new people. */
   function kick(a) {
@@ -588,13 +602,19 @@
   }
 
   /* ================= hit testing ================= */
-  function nodeAt(sx, sy) {
+  /**
+   * The nearest circle within reach. Zoomed out to fit a hundred people a
+   * circle is four pixels across, so a finger gets a far wider reach than a
+   * cursor — the nearest wins, which keeps a crowded patch predictable.
+   */
+  function nodeAt(sx, sy, slack) {
+    const pad = slack == null ? 6 : slack;
     let best = null, bestD = Infinity;
     for (let i = 0; i < nodes.length; i++) {
       const n = nodes[i];
       const s = toScreen(n.x, n.y);
       const d = Math.hypot(s.x - sx, s.y - sy);
-      const reach = Math.max(n.r * view.k, 7) + 6;
+      const reach = Math.max(n.r * view.k, 7) + pad;
       if (d <= reach && d < bestD) { best = n; bestD = d; }
     }
     return best;
@@ -650,7 +670,7 @@
   function onDown(e) {
     if (trackTouch(e, 'down')) return;
     const at = pointerAt(e);
-    const n = nodeAt(at.x, at.y);
+    const n = nodeAt(at.x, at.y, e.pointerType === 'touch' ? 17 : 6);
     try { cv.setPointerCapture(e.pointerId); } catch (_) {}
     if (n) {
       // Pin where it stands: a plain click must not stir the layout, only a drag.
@@ -702,7 +722,7 @@
       if (n) { n.fx = null; n.fy = null; }
       if (!drag.moved && n) {
         if (C) C.select([n.id]);
-        if (e.pointerType === 'touch') setHover(n.id, pointerAt(e));
+        if (e.pointerType === 'touch') { hideTip(); askSurface(n.id); }
         const now = Date.now();
         if (e.pointerType === 'touch' && now - tapAt < 340 && tapPos && Math.hypot(tapPos.x - e.clientX, tapPos.y - e.clientY) < 26) {
           openOnCanvas(n.id);
@@ -730,6 +750,39 @@
 
   function openOnCanvas(id) {
     if (BB.app && typeof BB.app.showOnCanvas === 'function') BB.app.showOnCanvas(id);
+  }
+
+  /**
+   * A tap wants the person, but the sheet cannot go up here: opening it puts a
+   * backdrop under the finger, and the click that follows every tap would land
+   * on that backdrop and close it again. Wait for the click, and act then — or
+   * shortly after, for a browser that never sends one.
+   */
+  function askSurface(id) {
+    wantSurface = id;
+    setTimeout(() => { if (wantSurface === id) takeSurface(); }, 220);
+  }
+
+  function takeSurface() {
+    const id = wantSurface;
+    wantSurface = null;
+    if (id) surface(id);
+  }
+
+  /**
+   * Tapping a circle should do what tapping a bubble does — put the person in
+   * front of you. The peek card if the app has one, the detail sheet if not.
+   */
+  function surface(id) {
+    if (!isPhone()) return;
+    if (BB.peek && typeof BB.peek.show === 'function') {
+      // The card belongs to the canvas and turns itself down elsewhere, so ask
+      // it first and read whether it took the job.
+      BB.peek.show(id);
+      if (BB.peek.isOpen && BB.peek.isOpen()) return;
+    }
+    if (BB.inspector && typeof BB.inspector.show === 'function') BB.inspector.show(id);
+    else if (BB.app && typeof BB.app.setPanel === 'function') BB.app.setPanel('details', true);
   }
 
   /** Two fingers pan and pinch together; one finger falls through to the usual handlers. */
@@ -868,6 +921,66 @@
     if (pathState) runPath();
   }
 
+  /**
+   * Six controls on one 390px row is a scrolling mess, and four of them are set
+   * once and left alone. On a phone those four move into the panel — which is
+   * already a sheet — and the toolbar keeps what you reach for mid-thought:
+   * the three filters, the zoom and the panel button itself.
+   */
+  const stowable = [];
+  let stowedNow = null;
+
+  function buildSide() {
+    const side = $('#web-side');
+    if (!side) return;
+    sideHead = el('div.web-side-head', {}, [
+      el('strong', { text: 'Web tools' }),
+      el('button.btn.icon.ghost.sm', {
+        type: 'button', title: 'Close', 'aria-label': 'Close the panel',
+        onclick: () => setSide(false),
+      }, [U.icon('close')]),
+    ]);
+    swipeToClose(sideHead);
+    optsEl = el('div.web-panel.web-opts', {}, [el('h3', { text: 'Display' })]);
+    side.prepend(sideHead);
+    [colorEl, labelsEl, spreadEl, isolatedEl].forEach(node => {
+      const wrap = node && node.closest('label');
+      if (wrap && wrap.parentNode) stowable.push({ wrap: wrap, home: wrap.parentNode, after: wrap.nextSibling });
+    });
+  }
+
+  /** The sheet wears a grab bar, so it had better answer to a pull downwards. */
+  function swipeToClose(bar) {
+    let y0 = null;
+    bar.addEventListener('pointerdown', (e) => { y0 = e.pointerType === 'mouse' ? null : e.clientY; }, { passive: true });
+    bar.addEventListener('pointermove', (e) => {
+      if (y0 == null) return;
+      if (e.clientY - y0 > 46) { y0 = null; setSide(false); }
+    }, { passive: true });
+    const letGo = () => { y0 = null; };
+    bar.addEventListener('pointerup', letGo, { passive: true });
+    bar.addEventListener('pointercancel', letGo, { passive: true });
+  }
+
+  function layoutControls() {
+    const phone = isPhone();
+    if (phone === stowedNow) return;
+    stowedNow = phone;
+    const side = $('#web-side');
+    if (phone && optsEl && side) {
+      stowable.forEach(st => optsEl.appendChild(st.wrap));
+      side.insertBefore(optsEl, sideHead ? sideHead.nextSibling : side.firstChild);
+    } else {
+      // Back to front: each control goes in ahead of the neighbour it had, and
+      // that neighbour has to be home already for insertBefore to find it.
+      for (let i = stowable.length - 1; i >= 0; i--) stowable[i].home.insertBefore(stowable[i].wrap, stowable[i].after);
+      if (optsEl) optsEl.remove();
+    }
+    const all = $('[data-webshow="all"]', root);
+    if (all) all.textContent = phone ? 'All' : 'All links';
+    if (sideBtn) sideBtn.textContent = phone ? 'Tools' : 'Panel';
+  }
+
   function setSide(open, save) {
     opts.side = !!open;
     if (root) root.classList.toggle('is-side-open', opts.side);
@@ -925,6 +1038,7 @@
     cv.addEventListener('pointercancel', onUp);
     cv.addEventListener('pointerleave', () => { if (!drag && !pan) setHover(null); });
     cv.addEventListener('wheel', onWheel, { passive: false });
+    cv.addEventListener('click', () => { if (wantSurface) takeSurface(); });
     cv.addEventListener('dblclick', (e) => {
       const at = pointerAt(e);
       const n = nodeAt(at.x, at.y);
@@ -977,8 +1091,17 @@
     isolatedEl = $('#web-isolated');
 
     loadPrefs();
+    buildSide();
     applyControls();
+    layoutControls();
     wire();
+
+    const onWidth = () => {
+      layoutControls();
+      if (visible && measure()) requestPaint();
+    };
+    if (PHONE.addEventListener) PHONE.addEventListener('change', onWidth);
+    else if (PHONE.addListener) PHONE.addListener(onWidth);
 
     S.on('change', onStoreChange);
     if (C && typeof C.on === 'function') C.on('select', () => { if (visible) requestPaint(); });

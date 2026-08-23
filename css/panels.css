@@ -1,0 +1,74 @@
+/* Bible Bubble — the detail sheet, the lineage drawer and the timeline, on a
+   phone. Loaded after app.css, so an equal-specificity rule here wins it; and
+   before mobile.css, which owns the canvas. */
+
+@media (max-width: 700px) {
+  /* ---------- the detail sheet ---------- */
+  .inspector { overscroll-behavior: contain; }
+
+  /* The grab bar rides above the head instead of scrolling away under it. */
+  .inspector::before {
+    position: absolute; top: 8px; left: 50%; margin: 0 0 0 -19px; z-index: 4;
+  }
+  .insp-head { padding: 15px 10px 0; }
+  .insp-head-top { align-items: center; }
+  .insp-name-input { font-size: 17px; }
+
+  /* Four pages instead of one long column — see js/inspector.js. */
+  .insp-pages { display: flex; gap: 2px; margin-top: 6px; }
+  .insp-page {
+    flex: 1; min-width: 0; min-height: 44px; padding: 0 2px;
+    display: inline-flex; align-items: center; justify-content: center; gap: 5px;
+    border: 0; border-bottom: 2px solid transparent; background: transparent;
+    color: var(--ink-3); font-size: 13px; font-weight: 600; cursor: pointer;
+  }
+  .insp-page .count {
+    font-size: 11px; font-weight: 500; font-variant-numeric: tabular-nums;
+    background: var(--bg-sunk); border-radius: 999px; padding: 1px 6px;
+  }
+  .insp-page.is-on { color: var(--accent-ink); border-bottom-color: var(--accent); }
+  .insp-page.is-on .count { background: var(--accent-soft); color: var(--accent-ink); }
+
+  .insp-body.is-paged { padding-top: 2px; }
+  .insp-body.is-paged > .insp-swatches { margin: 8px 0 10px; }
+
+  /* Thumb-sized: everything here is hit with a finger, not a cursor. */
+  .insp-swatch { width: 30px; height: 30px; position: relative; }
+  .insp-swatch::after { content: ""; position: absolute; inset: -7px -3px; }
+  .insp-swatches { gap: 6px; flex-wrap: wrap; }
+  .seg button { height: 40px; font-size: 13.5px; }
+  .rel-item { min-height: 44px; padding: 2px 4px 2px 8px; }
+  .rel-item .btn.icon.sm, .rel-bond .btn.icon.sm { width: 42px; min-height: 42px; }
+  .quick-rel { gap: 6px; }
+  .quick-rel .btn { flex: 1 1 44%; height: 42px; font-size: 13px; justify-content: center; }
+  .quick-rel .btn.ghost { border-color: var(--line); }   /* or it reads as a caption */
+  .mini-add, .insp-sect > .bond-add { height: 44px; font-size: 13px; }
+  .hl-item .btn { min-height: 40px; }
+  .tl-toggle { min-height: 44px; }
+  input[type="checkbox"] { width: 19px; height: 19px; }
+  .tg { font-size: 12.5px; padding: 3px 4px 3px 9px; }
+  .tg button { min-width: 26px; min-height: 26px; font-size: 15px; }
+  .stat .v { font-size: 16px; }
+  .insp-foot { padding: 8px 10px calc(8px + env(safe-area-inset-bottom)); }
+  .insp-foot .btn.sm { min-height: 44px; padding: 0 14px; font-size: 13px; }
+
+  /* A soft keyboard covers the bottom of the screen, and this sheet is anchored
+     there. js/inspector.js measures the overlap; the sheet steps up over it and
+     gives back the height rather than growing off the top of the screen. */
+  #app.panel-details .inspector {
+    transform: translateY(calc(-1 * var(--insp-kb, 0px)));
+    max-height: calc(100vh - var(--insp-kb, 0px) - var(--mobilebar-h) - 12px);
+    max-height: calc(100dvh - var(--insp-kb, 0px) - var(--mobilebar-h) - 12px);
+  }
+
+  /* ---------- the lineage drawer ---------- */
+  .tree-row { min-height: 44px; padding: 4px 6px; gap: 7px; }
+  .tree-name { font-size: 14.5px; }
+  .tree-meta { font-size: 12px; }
+  .tree-twist { width: 26px; height: 26px; position: relative; }
+  .tree-twist::after { content: ""; position: absolute; inset: -9px -8px; }
+  .tree-twist svg { width: 14px; height: 14px; }
+  .side-body { overscroll-behavior: contain; padding-bottom: 16px; }
+  .side-foot { padding-bottom: calc(7px + env(safe-area-inset-bottom)); }
+  .side-tab { height: 40px; }
+}

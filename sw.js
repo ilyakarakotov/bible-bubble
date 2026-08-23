@@ -14,6 +14,7 @@ const SHELL = [
   'manifest.webmanifest',
   'css/app.css',
   'css/web.css',
+  'css/panels.css',
   'css/pwa.css',
   'css/mobile.css',
   'js/util.js',

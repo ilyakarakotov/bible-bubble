@@ -1,5 +1,6 @@
 /* ============================================================
-   Bible Bubble — the web view: circles for people, threads for links
+   Bible Bubble — the web view: circles for people, threads for links,
+   and the phone shapes of the panels that stand around the views.
    ============================================================ */
 
 /* ---------- which view is on ---------- */
@@ -104,6 +105,21 @@
 }
 .web-rank-row:hover .c { color: var(--accent-ink); background: var(--accent-soft); }
 
+/* The sheet's own title bar — a phone needs a way out of it that is not the
+   button on the toolbar it has just covered. */
+.web-side-head { display: none; }
+
+/* The timeline's overflow button and the panel behind it: phone only, built by
+   js/timeline.js. */
+.tl-opts-btn { display: none; }
+.tl-opts {
+  position: absolute; right: 8px; z-index: 9;
+  width: min(280px, calc(100vw - 16px));
+  padding: 2px 12px 8px;
+  background: var(--panel); border: 1px solid var(--line); border-radius: 12px;
+  box-shadow: var(--shadow-lg);
+}
+
 /* ---------- touch ---------- */
 @media (pointer: coarse) {
   /* Anything a finger lands on gets a 40px target, and no text under 16px:
@@ -115,8 +131,20 @@
   .web-toolbar .chip, .web-toolbar .btn { min-height: 40px; }
   .web-toolbar .chip { padding: 0 14px; }
   .web-toolbar .btn.icon { min-width: 40px; }
-  .web-rank-row { min-height: 40px; }
+  .web-rank-row { min-height: 44px; }
   .web-step { min-height: 40px; }
+
+  /* A 17px bar is a thin thing to hit; the target reaches into the row's gap,
+     and a single-year dot gets room on both sides of its 11px. */
+  .tl-bar::after { content: ""; position: absolute; inset: -6px -2px; }
+  .tl-bar.is-point::after { inset: -9px -13px; }
+  .tl-alive .who, .tl-undated .who { min-height: 36px; padding-left: 11px; padding-right: 11px; }
+
+  /* Without this the browser owns the gesture and the scrubber cannot be
+     dragged at all; js/timeline.js moves it from here on. */
+  .tl-scrub-handle { touch-action: none; min-height: 30px; }
+  .tl-scrub-handle::after { content: ""; position: absolute; inset: -10px -16px; }
+  .tl-names { touch-action: none; }
 }
 
 /* ---------- phone ---------- */
@@ -143,6 +171,51 @@
     border-radius: 999px; background: var(--line);
   }
   .web-tip { max-width: min(236px, calc(100vw - 24px)); }
+
+  /* Pinch does the zooming here, so the toolbar keeps only Fit. */
+  .web-toolbar [data-act="web-zoom-in"], .web-toolbar [data-act="web-zoom-out"] { display: none; }
+
+  .web-side-head {
+    display: flex; align-items: center; justify-content: space-between; flex: none;
+    padding: 2px 6px 4px 12px;
+  }
+  .web-side-head strong { font-family: var(--serif); font-size: 15px; }
+  .web-side-head .btn.icon.sm { width: 42px; min-height: 42px; }
+
+  /* The four display controls, moved here off the toolbar by js/web.js. */
+  .web-opts .tl-field, .web-opts .tl-toggle {
+    display: flex; align-items: center; justify-content: space-between;
+    gap: 10px; min-height: 44px;
+  }
+  .web-opts .tl-toggle { flex-direction: row-reverse; }
+  .web-opts .tl-field span, .web-opts .tl-toggle span {
+    display: inline; font-size: 13.5px; color: var(--ink-2);
+  }
+  .web-opts select {
+    width: 48%; flex: none; height: 40px; font-size: 16px;
+    background-position: calc(100% - 14px) 19px, calc(100% - 9px) 19px;
+  }
+  .web-opts input[type="range"] {
+    width: 48%; flex: none; height: 40px; padding: 0; border: 0;
+    background: transparent; accent-color: var(--accent);
+  }
+
+  /* ---------- the timeline ---------- */
+  .tl-opts-btn { display: inline-flex; }
+  .tl-opts .tl-field, .tl-opts .tl-toggle {
+    display: flex; align-items: center; justify-content: space-between;
+    gap: 10px; min-height: 44px;
+  }
+  .tl-opts .tl-toggle { flex-direction: row-reverse; }
+  .tl-opts .tl-field span, .tl-opts .tl-toggle span {
+    display: inline; font-size: 13.5px; color: var(--ink-2);
+  }
+  .tl-opts select {
+    width: 52%; flex: none; height: 40px; font-size: 16px;
+    background-position: calc(100% - 14px) 19px, calc(100% - 9px) 19px;
+  }
+  .tl-name-row { font-size: 12.5px; }
+  .tl-scroll { overscroll-behavior: contain; }
 }
 
 /* Landscape phones have no room for a tall sheet. */

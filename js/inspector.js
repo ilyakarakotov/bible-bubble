@@ -11,6 +11,30 @@
     'Egypt and the Exodus', 'The judges', 'The united kingdom', 'Kings of Judah', 'Kings of Israel',
     'Exile and return', 'Between the testaments', 'The Gospel', 'The early church'];
 
+  const PHONE = window.matchMedia('(max-width: 700px)');
+  const isPhone = () => PHONE.matches;
+
+  /**
+   * On a phone this panel is a sheet over the canvas rather than a full-height
+   * column, and its seven sections run to several screens of scrolling in it.
+   * There they split into four pages, so the part you came for is a tap away
+   * rather than a hunt, and the page each person was left on is remembered.
+   */
+  const PAGES = [
+    { id: 'about', label: 'About', of: ['swatches', 'identity', 'years', 'highlights'] },
+    { id: 'family', label: 'Family', of: ['rel', 'lineage'] },
+    { id: 'links', label: 'Connections', of: ['connections'] },
+    { id: 'notes', label: 'Notes', of: ['notes'] },
+  ];
+  const COLUMN = ['identity', 'years', 'highlights', 'notes', 'rel', 'connections', 'lineage'];
+
+  const pageById = new Map();      // person -> the page they were reading
+  const scrollBy = new Map();      // person|page -> how far down they had got
+  let shown = { id: null, page: null };
+
+  const pageFor = (id) => (pageById.get(id) || 'about');
+  const scrollKey = (id, page) => id + '|' + page;
+
   /* ---------- small builders ---------- */
   function field(label, control, hint) {
     return el('div.field', {}, [label ? el('label', { text: label }) : null, control, hint ? el('div.hint', { text: hint }) : null]);
@@ -96,6 +120,17 @@
   }
 
   /* ---------- relations ---------- */
+  /**
+   * Follow a link to someone else. On a phone the sheet stays open and lands on
+   * the same page it was on, so walking a family or a chain of connections is
+   * one tap per step rather than a tap and a scroll.
+   */
+  function goTo(id) {
+    if (isPhone() && currentId && S.person(id)) pageById.set(id, pageFor(currentId));
+    C.select([id]);
+    C.focus(id, { zoom: 0.9 });
+  }
+
   function personRow(id, opts) {
     const o = opts || {};
     const p = S.person(id);
@@ -105,7 +140,7 @@
       : U.formatSpan(p.birth, p.death, { mode: 'era', anchor: st.anchor, approx: p.approx });
     return el('div.rel-item', { title: 'Go to ' + (p.name || 'this person'), onclick: (e) => {
       if (e.target.closest('button')) return;
-      C.select([id]); C.focus(id, { zoom: 0.9 });
+      goTo(id);
     } }, [
       el('span.tree-dot', { style: { background: `var(--c-${U.colorOf(p.color)})` } }),
       el('span.rel-name', { text: p.name || 'Unnamed' }),
@@ -156,7 +191,7 @@
       },
       onclick: (e) => {
         if (e.target.closest('button')) return;
-        C.select([b.id]); C.focus(b.id, { zoom: 0.9 });
+        goTo(b.id);
       },
     }, [
       el('div.bond-main', {}, [
@@ -201,7 +236,19 @@
     const path = L.pathToRoot(p.id);
 
     /* header */
+    const phone = isPhone();
+    const page = phone ? pageFor(p.id) : null;
     const nameInput = boundInput(p, 'name', { placeholder: 'Name', class: 'insp-name-input' });
+    const swatches = el('div.insp-swatches', {}, U.PALETTE.map(c => el('button.insp-swatch' + (p.color === c.key ? '.is-on' : ''), {
+      type: 'button', title: c.label, style: { background: `var(--c-${c.key})` },
+      onclick: () => { S.updatePerson(p.id, { color: c.key }, { label: 'color' }); S.seal(); refresh(); },
+    })));
+    const counts = { family: parents.length + spouses.length + kids.length, links: bonds.length };
+    const strip = el('div.insp-pages', { role: 'tablist' }, PAGES.map(pg => el('button.insp-page' + (pg.id === page ? '.is-on' : ''), {
+      type: 'button', role: 'tab', 'aria-selected': String(pg.id === page), 'aria-controls': 'insp-page',
+      onclick: () => { pageById.set(p.id, pg.id); render(); },
+    }, [pg.label, counts[pg.id] ? el('span.count', { text: String(counts[pg.id]) }) : null])));
+
     const head = el('div.insp-head', {}, [
       el('div.insp-head-top', {}, [
         el('div.insp-title', {}, [
@@ -215,12 +262,15 @@
           ]),
         ]),
         el('button.btn.icon.ghost.sm', { type: 'button', title: 'Centre on canvas', onclick: () => C.focus(p.id, { zoom: 0.95 }) }, [icon('target')]),
-        el('button.btn.icon.ghost.sm', { type: 'button', title: 'Close panel', onclick: () => C.select([]) }, [icon('close')]),
+        // On a phone the cross dismisses the sheet: the selection is what the
+        // canvas, the bottom bar and the peek card are all showing, and losing
+        // it just to put the sheet away is never what the tap meant.
+        el('button.btn.icon.ghost.sm', {
+          type: 'button', title: phone ? 'Close' : 'Close panel',
+          onclick: () => { if (phone && BB.app) BB.app.setPanel('details', false); else C.select([]); },
+        }, [icon('close')]),
       ]),
-      el('div.insp-swatches', {}, U.PALETTE.map(c => el('button.insp-swatch' + (p.color === c.key ? '.is-on' : ''), {
-        type: 'button', title: c.label, style: { background: `var(--c-${c.key})` },
-        onclick: () => { S.updatePerson(p.id, { color: c.key }, { label: 'color' }); S.seal(); refresh(); },
-      }))),
+      phone ? strip : swatches,
     ]);
 
     /* identity */
@@ -367,7 +417,7 @@
       if (i) crumbs.appendChild(el('span.crumb-sep', { text: ' › ' }));
       const q = S.person(id);
       if (id === p.id) crumbs.appendChild(el('strong', { text: q ? q.name : '?' }));
-      else crumbs.appendChild(el('a', { text: q ? q.name : '?', onclick: () => { C.select([id]); C.focus(id, { zoom: 0.9 }); } }));
+      else crumbs.appendChild(el('a', { text: q ? q.name : '?', onclick: () => goTo(id) }));
     });
 
     const lineage = section('Line of descent', [
@@ -392,7 +442,18 @@
       el('button.btn.sm.danger', { type: 'button', title: 'Delete (⌫)', onclick: () => BB.app.deleteSelected() }, [icon('trash'), el('span', { text: 'Delete' })]),
     ]);
 
-    host.replaceChildren(head, el('div.insp-body', {}, [identity, years, highlights, notes, rel, connections, lineage]), foot);
+    const parts = { swatches, identity, years, highlights, notes, rel, connections, lineage };
+    const order = phone ? (PAGES.find(pg => pg.id === page) || PAGES[0]).of : COLUMN;
+    const body = el('div.insp-body' + (phone ? '.is-paged' : ''),
+      phone ? { id: 'insp-page', role: 'tabpanel' } : {}, order.map(k => parts[k]));
+
+    // A redraw must not throw the reader back to the top: hold the scroll where
+    // they left it, per person and per page.
+    const same = shown.id === p.id && shown.page === page;
+    const back = same ? host.scrollTop : (scrollBy.get(scrollKey(p.id, page)) || 0);
+    host.replaceChildren(head, body, foot);
+    shown = { id: p.id, page };
+    if (back) host.scrollTop = back;
   }
 
   function removeHighlight(p, i) {
@@ -418,6 +479,7 @@
 
   function renderEmpty() {
     currentId = null;
+    shown = { id: null, page: null };
     const n = S.count();
     host.replaceChildren(el('div.insp-empty', {}, [
       icon('people'),
@@ -428,6 +490,7 @@
 
   function renderMulti(sel) {
     currentId = null;
+    shown = { id: null, page: null };
     host.replaceChildren(
       el('div.insp-head', {}, [
         el('div.insp-head-top', {}, [
@@ -474,9 +537,53 @@
     render();
   }
 
+  /**
+   * A soft keyboard covers the bottom of the screen and this sheet is anchored
+   * there, so the field being typed in ends up underneath it. Lift the sheet by
+   * however much the keyboard takes — the stylesheet shrinks it to match — and
+   * keep the focused field clear of the sheet's own head and foot.
+   */
+  function watchKeyboard() {
+    const vv = window.visualViewport;
+    if (!vv) return;                       // no way to know: leave the sheet alone
+    const app = U.$('#app');
+    const apply = () => {
+      const over = Math.max(0, window.innerHeight - vv.height - vv.offsetTop);
+      const typing = document.activeElement && host.contains(document.activeElement);
+      const on = isPhone() && over > 90 && typing && app && app.classList.contains('panel-details');
+      document.documentElement.style.setProperty('--insp-kb', (on ? Math.round(over) : 0) + 'px');
+      if (on) keepFieldInView();
+    };
+    vv.addEventListener('resize', apply);
+    vv.addEventListener('scroll', apply);
+    host.addEventListener('focusin', () => setTimeout(apply, 260));
+    host.addEventListener('focusout', () => setTimeout(apply, 60));
+  }
+
+  function keepFieldInView() {
+    const a = document.activeElement;
+    if (!a || !host.contains(a)) return;
+    const box = host.getBoundingClientRect();
+    const head = host.querySelector('.insp-head');
+    const foot = host.querySelector('.insp-foot');
+    const top = (head ? head.getBoundingClientRect().bottom : box.top) + 6;
+    const bottom = (foot ? foot.getBoundingClientRect().top : box.bottom) - 6;
+    const r = a.getBoundingClientRect();
+    if (r.bottom > bottom) host.scrollTop += r.bottom - bottom;
+    else if (r.top < top) host.scrollTop -= top - r.top;
+  }
+
   function init() {
     S = BB.store; L = BB.lineage; C = BB.canvas;
     host = U.$('#inspector');
+    host.addEventListener('scroll', () => {
+      if (shown.id) scrollBy.set(scrollKey(shown.id, shown.page), host.scrollTop);
+    }, { passive: true });
+    // Crossing the phone breakpoint changes the panel from a column to pages.
+    const onWidth = () => { shown = { id: null, page: null }; refresh(true); };
+    if (PHONE.addEventListener) PHONE.addEventListener('change', onWidth);
+    else if (PHONE.addListener) PHONE.addListener(onWidth);
+    watchKeyboard();
     C.on('select', () => render());
     C.on('trace', () => refresh());
     S.on('change', (p) => {
@@ -487,5 +594,14 @@
     render();
   }
 
-  BB.inspector = { init, render, refresh };
+  /** Open the sheet on a given page — 'about', 'family', 'links' or 'notes'. */
+  function show(id, page) {
+    if (!S.person(id)) return;
+    if (page && PAGES.some(pg => pg.id === page)) pageById.set(id, page);
+    if (C.selected().length !== 1 || C.selected()[0] !== id) C.select([id]);
+    else render();
+    if (isPhone() && BB.app) BB.app.setPanel('details', true);
+  }
+
+  BB.inspector = { init, render, refresh, show };
 })(window.BB);

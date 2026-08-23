@@ -9,6 +9,10 @@
   let tab = 'outline';
   let filter = '';
   let collapsed = new Set();
+  let lastSeen = null;
+
+  const PHONE = window.matchMedia('(max-width: 700px)');
+  const isPhone = () => PHONE.matches;
 
   function metaOf(p) {
     const st = S.settings();
@@ -52,7 +56,10 @@
     const idx = L.index(S.doc);
     const frag = document.createDocumentFragment();
     const drawn = new Set();
-    const INDENT = 11, MAX_INDENT = 9;
+    // A phone drawer is 320px wide and its rows are finger-sized: nine steps of
+    // indent would leave a name three letters wide.
+    const INDENT = isPhone() ? 9 : 11;
+    const MAX_INDENT = isPhone() ? 6 : 9;
 
     // when filtering, keep a branch if it or anything under it matches
     const keep = new Set();
@@ -133,10 +140,28 @@
     footEl.replaceChildren(el('span', { text: bits.join(' · ') }));
   }
 
+  /**
+   * Follow the selection: opening the drawer after picking someone elsewhere
+   * should show them, not the top of a hundred-name outline.
+   */
+  function keepSelectedInView() {
+    const sel = C.selected();
+    const id = sel.length === 1 ? sel[0] : null;
+    if (id === lastSeen) return;
+    lastSeen = id;
+    if (!id) return;
+    const row = bodyEl.querySelector('.tree-row.is-sel');
+    if (!row) return;
+    const r = row.getBoundingClientRect(), b = bodyEl.getBoundingClientRect();
+    if (r.top >= b.top && r.bottom <= b.bottom) return;
+    bodyEl.scrollTop += (r.top - b.top) - (b.height - r.height) / 2;
+  }
+
   function render() {
     if (!bodyEl) return;
     if (tab === 'outline') renderOutline(); else renderList();
     renderFoot();
+    keepSelectedInView();
   }
 
   function init() {
@@ -159,6 +184,9 @@
 
     S.on('change', (p) => { if (p.reason !== 'positions') render(); });
     C.on('select', render);
+    const onWidth = () => render();
+    if (PHONE.addEventListener) PHONE.addEventListener('change', onWidth);
+    else if (PHONE.addListener) PHONE.addListener(onWidth);
     render();
   }
 
