@@ -1,4 +1,4 @@
-/* Bible Bubble — wiring: toolbar, menus, search, shortcuts, first run. */
+/* Bible Bubble — wiring: toolbar, menus, search, shortcuts, routing, first run. */
 (function (BB) {
   'use strict';
   const U = BB.util;
@@ -6,6 +6,12 @@
 
   let S, L, C;
   let currentView = 'canvas';
+
+  const VIEWS = ['canvas', 'web', 'timeline'];
+  const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)');
+  const coarse = window.matchMedia('(pointer: coarse)');
+  /** Canvas moves are animated unless the reader has asked for stillness. */
+  const glide = (opts) => Object.assign({ animate: !reduceMotion.matches }, opts || {});
 
   /* ================= theme ================= */
   function applyTheme(mode) {
@@ -25,19 +31,127 @@
     applyTheme(isDark ? 'light' : 'dark');
   }
 
+  /* ================= the URL ================= */
+  /**
+   * The address bar is app state: `?view=` for the open view, `?board=` for
+   * which board, `#p=` for the person in focus. Everything routine replaces the
+   * current entry; only changing view pushes one, which is what lets Android's
+   * back button walk back through the views instead of leaving an installed app.
+   *
+   * A `file://` document has an opaque origin and rejects pushState outright, so
+   * the whole router falls silent there rather than throwing on every move.
+   */
+  const canRoute = location.protocol !== 'file:';
+  let applyingRoute = false;
+  let lastUrl = location.href;
+  let guardPushed = false;
+  let depth = 0;                  // how many entries of our own are behind this one
+
+  function readRoute() {
+    const q = new URLSearchParams(location.search);
+    let p = null;
+    try { p = new URLSearchParams(location.hash.replace(/^#/, '')).get('p'); } catch (_) {}
+    const v = q.get('view');
+    return { view: VIEWS.includes(v) ? v : null, board: q.get('board'), person: p };
+  }
+
+  function routeUrl() {
+    const q = new URLSearchParams();
+    if (currentView !== 'canvas') q.set('view', currentView);
+    if (S.doc.id) q.set('board', S.doc.id);
+    const sel = C.selected();
+    const query = q.toString();
+    return location.pathname + (query ? '?' + query : '') +
+      (sel.length === 1 ? '#p=' + encodeURIComponent(sel[0]) : '');
+  }
+
+  function writeUrl(mode) {
+    if (!canRoute || applyingRoute) return;
+    const next = routeUrl();
+    if (next === location.pathname + location.search + location.hash) { lastUrl = location.href; return; }
+    const push = mode === 'push';
+    try {
+      history[push ? 'pushState' : 'replaceState']({ bb: 1, i: push ? depth + 1 : depth }, '', next);
+      if (push) depth++;
+      lastUrl = location.href;
+    } catch (_) { /* opaque origin — the app works, it just has no address */ }
+  }
+  const writeUrlSoon = U.debounce(() => writeUrl('replace'), 220);
+
+  /** Take the view and the selection from whatever the URL now says. */
+  function applyRoute() {
+    const r = readRoute();
+    applyingRoute = true;
+    try {
+      setView(r.view || 'canvas', { history: 'none' });
+      if (r.person && S.person(r.person)) revealPerson(r.person);
+      else if (!r.person) C.select([]);
+    } finally {
+      applyingRoute = false;
+      lastUrl = location.href;
+    }
+  }
+
+  /**
+   * Back closes what is on top before it navigates, which needs an entry to pop.
+   * Installed from a home screen there is nothing behind the first page, so one
+   * spare entry goes in the moment something openable opens — once, and only
+   * while we are still standing on our own first entry.
+   */
+  function guardHistory() {
+    if (!canRoute || guardPushed || depth > 0) return;
+    try { history.pushState({ bb: 'guard', i: depth }, '', lastUrl); guardPushed = true; } catch (_) {}
+  }
+
+  function closeTopLayer() {
+    if (modalStack.length) { modalStack[modalStack.length - 1].close(); return true; }
+    if (!$('#context-menu').hidden) { closeMenu(); return true; }
+    if (isPhone() && anyPanelOpen()) { closePanels(); return true; }
+    if (BB.peek && BB.peek.isOpen && BB.peek.isOpen()) { BB.peek.hide(); return true; }
+    if ($('#app').classList.contains('search-open')) { toggleSearch(false); return true; }
+    return false;
+  }
+
+  function initRouter() {
+    window.addEventListener('popstate', () => {
+      const st = history.state;
+      depth = (st && typeof st.i === 'number') ? st.i : 0;
+      /* Consume the press to close what is open, then put the entry back so the
+         next press is the one that navigates. */
+      if (closeTopLayer()) {
+        try { history.pushState({ bb: 1, i: depth }, '', lastUrl); } catch (_) {}
+        return;
+      }
+      applyRoute();
+    });
+  }
+
   /* ================= views ================= */
-  function setView(v) {
+  function setView(v, opts) {
+    const o = opts || {};
+    if (!VIEWS.includes(v)) v = 'canvas';
+    const moved = v !== currentView;
     currentView = v;
     const app = $('#app');
     app.classList.toggle('view-canvas', v === 'canvas');
     app.classList.toggle('view-timeline', v === 'timeline');
     app.classList.toggle('view-web', v === 'web');
-    $$('.viewtabs .tab').forEach(t => t.classList.toggle('is-active', t.dataset.view === v));
+    paintViewTabs();
     if (v === 'timeline') BB.timeline.show(); else BB.timeline.hide();
     if (v === 'web') BB.web.show(); else BB.web.hide();
     if (v === 'canvas') C.render();
     S.setPref('view', v);
     paintMobileBar();
+    if (o.history !== 'none') writeUrl(o.history || (moved ? 'push' : 'replace'));
+  }
+
+  function paintViewTabs() {
+    $$('.viewtabs .tab').forEach(t => {
+      const on = t.dataset.view === currentView;
+      t.classList.toggle('is-active', on);
+      t.setAttribute('aria-selected', String(on));
+      t.tabIndex = on ? 0 : -1;
+    });
   }
 
   /* ================= placement helpers ================= */
@@ -59,11 +173,19 @@
     const spot = freeSpot(at.x - NEW_W / 2, at.y - NEW_H / 2);
     const p = S.addPerson(Object.assign({ x: spot.x, y: spot.y, name: '' }, props || {}));
     C.select([p.id]);
-    focusNameField();
+    focusNameField(p.id);
     return p;
   }
 
-  function focusNameField() {
+  /**
+   * Naming happens in the details panel. On a phone that panel is a sheet that
+   * is closed until asked for, so focusing the field inside it would raise the
+   * keyboard over nothing at all: open the sheet first, and shift the canvas so
+   * the bubble being named is not left underneath it.
+   */
+  function focusNameField(id) {
+    /* setPanel slides the canvas clear of the sheet on the way in. */
+    if (isPhone()) setPanel('details', true);
     requestAnimationFrame(() => {
       const input = $('#inspector .insp-name-input');
       if (input) { input.focus(); input.select(); }
@@ -96,7 +218,7 @@
       : S.addLink(anchorId, p.id, 'parent');
     if (!res.ok) U.toast(linkError(res.reason));
     C.select([p.id]);
-    focusNameField();
+    focusNameField(p.id);
     return p;
   }
 
@@ -122,18 +244,13 @@
   }
 
   /* ================= actions ================= */
+  /* The undo offer comes from the watcher on the store, so a delete started
+     anywhere — menu, key, inspector — is offered back the same way. */
   function deleteSelected() {
     const ids = C.selected();
     if (!ids.length) return;
-    const names = ids.map(id => (S.person(id) || {}).name).filter(Boolean);
-    const backup = { people: ids.map(id => U.deepClone(S.person(id))).filter(Boolean),
-      links: S.links().filter(l => ids.includes(l.from) || ids.includes(l.to)).map(U.deepClone) };
     S.removePeople(ids);
     C.select([]);
-    U.toast(`Deleted ${ids.length === 1 ? (names[0] || 'that person') : U.plural(ids.length, 'person', 'people')}`, {
-      action: 'Undo', onAction: () => { S.undo(); },
-    });
-    return backup;
   }
 
   function duplicatePerson(id) {
@@ -146,7 +263,7 @@
     copy.name = p.name ? p.name + ' (copy)' : '';
     const made = S.addPerson(copy);
     C.select([made.id]);
-    focusNameField();
+    focusNameField(made.id);
   }
 
   function autoLayout(ids) {
@@ -161,8 +278,8 @@
     if (!Object.keys(pos).length) return;
     S.movePeople(pos, 'layout');
     S.seal();
-    setTimeout(() => C.fit(ids && ids.length ? ids : null), 40);
-    U.toast('Tidied into generations', { action: 'Undo', onAction: () => S.undo() });
+    setTimeout(() => C.fit(ids && ids.length ? ids : null, glide()), 40);
+    offerUndo('Tidied into generations');
   }
 
   function toggleTrace(id) {
@@ -185,31 +302,49 @@
   function revealPerson(id) {
     C.select([id]);
     if (isPhone()) closePanels();
-    if (currentView === 'canvas') C.focus(id, { zoom: 0.95 });
+    if (currentView === 'canvas') C.focus(id, glide({ zoom: 0.95 }));
     else if (currentView === 'web') BB.web.focus(id);
     else BB.timeline.draw();
   }
   function showOnCanvas(id) {
     setView('canvas');
-    requestAnimationFrame(() => C.focus(id, { zoom: 0.95 }));
+    requestAnimationFrame(() => C.focus(id, glide({ zoom: 0.95 })));
   }
 
   /* ================= menus ================= */
-  let openMenu = null;
+  let openMenu = null;              // the name of whatever menu is up, for rebuilding in place
+  let menuAnchor = null;            // the button that opened it, for rebuilding and focus
+  let menuReturn = null;            // where focus came from
   /** `#context-menu` is a fixture in the page — empty and hide it, never remove it. */
   function closeMenu() {
     const m = $('#context-menu');
-    if (m) { m.hidden = true; m.replaceChildren(); }
+    if (!m || m.hidden) { openMenu = null; return; }
+    const inside = m.contains(document.activeElement);
+    m.hidden = true;
+    m.replaceChildren();
     openMenu = null;
+    menuAnchor = null;
+    /* Only take focus back if the menu still had it — a click elsewhere has
+       already put it somewhere better. */
+    if (inside && menuReturn && menuReturn.isConnected) menuReturn.focus();
+    menuReturn = null;
   }
 
-  function menu(x, y, items) {
+  const menuItems = () => $$('.menu-item:not(.is-off)', $('#context-menu'));
+
+  function menu(x, y, items, opts) {
+    const o = opts || {};
     const host = $('#context-menu');
+    if (host.hidden) menuReturn = document.activeElement;
+    host.setAttribute('role', 'menu');
     host.replaceChildren();
     items.forEach(it => {
-      if (it === '-') { host.appendChild(el('div.menu-sep')); return; }
-      if (it.head) { host.appendChild(el('div.menu-head', { text: it.head })); return; }
+      if (!it) return;
+      if (it === '-') { host.appendChild(el('div.menu-sep', { role: 'separator' })); return; }
+      if (it.head) { host.appendChild(el('div.menu-head', { role: 'presentation', text: it.head })); return; }
       host.appendChild(el('div.menu-item' + (it.danger ? '.danger' : '') + (it.disabled ? '.is-off' : ''), {
+        role: 'menuitem', tabindex: '-1',
+        'aria-disabled': it.disabled ? 'true' : null,
         onclick: () => { closeMenu(); it.run && it.run(); },
       }, [
         it.icon ? icon(it.icon) : el('span', { style: { width: '15px' } }),
@@ -218,10 +353,45 @@
       ]));
     });
     host.hidden = false;
+    host.style.left = '0px';
+    host.style.top = '0px';
     const r = host.getBoundingClientRect();
-    host.style.left = Math.min(x, window.innerWidth - r.width - 8) + 'px';
-    host.style.top = Math.min(y, window.innerHeight - r.height - 8) + 'px';
-    openMenu = host;
+    host.style.left = Math.max(8, Math.min(x, window.innerWidth - r.width - 8)) + 'px';
+    host.style.top = Math.max(8, Math.min(y, window.innerHeight - r.height - 8)) + 'px';
+    host.scrollTop = 0;
+    openMenu = o.name || 'menu';
+    menuAnchor = o.anchor || null;
+    guardHistory();
+    /* Opened from the keyboard or rebuilt under the cursor — either way the
+       first item is where a keyboard user needs to land. */
+    const first = menuItems()[0];
+    if (first) first.focus({ preventScroll: true });
+  }
+
+  function initMenuKeys() {
+    const host = $('#context-menu');
+    host.addEventListener('keydown', (e) => {
+      const rows = menuItems();
+      if (!rows.length) return;
+      const at = rows.indexOf(document.activeElement);
+      if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+        e.preventDefault();
+        const step = e.key === 'ArrowDown' ? 1 : -1;
+        const next = rows[(at + step + rows.length) % rows.length] || rows[0];
+        next.focus({ preventScroll: true });
+        next.scrollIntoView({ block: 'nearest' });
+      } else if (e.key === 'Home' || e.key === 'End') {
+        e.preventDefault();
+        (e.key === 'Home' ? rows[0] : rows[rows.length - 1]).focus({ preventScroll: true });
+      } else if (e.key === 'Enter' || e.key === ' ') {
+        if (at < 0) return;
+        e.preventDefault();
+        rows[at].click();
+      } else if (e.key === 'Tab') {
+        e.preventDefault();
+        closeMenu();
+      }
+    });
   }
 
   function personMenu(x, y, id) {
@@ -239,7 +409,7 @@
       { label: multi && C.selection.size === 2 ? 'Connect these two…' : 'Connect to someone…', icon: 'web',
         run: () => { const two = [...C.selection]; addBond(id, multi && two.length === 2 ? two.find(x => x !== id) : null); } },
       { label: C.trace && C.trace.id === id ? 'Stop tracing' : 'Trace this line', icon: 'trace', key: 'T', run: () => toggleTrace(id) },
-      { label: 'Centre on this person', icon: 'target', run: () => C.focus(id, { zoom: 0.95 }) },
+      { label: 'Centre on this person', icon: 'target', run: () => C.focus(id, glide({ zoom: 0.95 })) },
       { label: 'Duplicate', icon: 'copy', key: '⌘D', run: () => duplicatePerson(id) },
       '-',
       { label: multi ? 'Delete these people' : 'Delete', icon: 'trash', key: '⌫', danger: true, run: deleteSelected },
@@ -251,7 +421,7 @@
       { label: 'Add a person here', icon: 'plus', key: 'N', run: () => addPersonAt(at) },
       '-',
       { label: 'Tidy into generations', icon: 'layout', key: 'L', run: () => autoLayout() },
-      { label: 'Fit everything on screen', icon: 'fit', key: 'F', run: () => C.fit() },
+      { label: 'Fit everything on screen', icon: 'fit', key: 'F', run: () => C.fit(null, glide()) },
       { label: 'Select all', icon: 'people', key: '⌘A', run: () => C.select(Object.keys(S.doc.people)) },
       '-',
       { label: S.settings().showGrid ? 'Hide the grid' : 'Show the grid', icon: 'grid', key: 'G', run: toggleGrid },
@@ -273,16 +443,20 @@
       { label: 'Make it a parent link', disabled: link.type === 'parent', run: () => retype(linkId, 'parent') },
       '-',
       { label: 'Reverse the direction', run: () => reverse(linkId) },
-      { label: 'Delete this link', icon: 'trash', danger: true, run: () => { S.removeLink(linkId); U.toast('Link removed', { action: 'Undo', onAction: () => S.undo() }); } },
+      { label: 'Delete this link', icon: 'trash', danger: true, run: () => S.removeLink(linkId) },
     ]);
   }
 
+  /* Retyping and reversing are a delete plus an add; the undo watcher must not
+     read the halfway point as somebody losing a link. */
   function retype(linkId, type, thenEdit) {
     const link = S.doc.links[linkId];
     if (!link) return;
     const { from, to, label } = link;
-    S.removeLink(linkId);
-    const res = S.addLink(from, to, type, { label });
+    const res = quietly(() => {
+      S.removeLink(linkId);
+      return S.addLink(from, to, type, { label });
+    });
     if (!res.ok) { S.undo(); U.toast(linkError(res.reason)); return; }
     if (thenEdit) editBond(res.link.id);
   }
@@ -290,22 +464,38 @@
     const link = S.doc.links[linkId];
     if (!link) return;
     const { from, to, type } = link;
-    S.removeLink(linkId);
-    const res = S.addLink(to, from, type);
+    const res = quietly(() => {
+      S.removeLink(linkId);
+      return S.addLink(to, from, type);
+    });
     if (!res.ok) { S.undo(); U.toast(linkError(res.reason)); }
+  }
+
+  /** How to install, for the browsers that will not offer to do it themselves. */
+  function installHelp() {
+    modal('Add Bible Bubble to your home screen', [
+      el('p', { text: 'Installed, the board opens full screen with no address bar and keeps working with no signal. Everything still lives on this device only.' }),
+      el('div.about-note', { html:
+        '<strong>On iPhone and iPad.</strong> Tap the <strong>Share</strong> button in Safari — ' +
+        'the square with an arrow out of it — then scroll to <strong>Add to Home Screen</strong>.' }),
+      el('div.about-note', { html:
+        '<strong>Elsewhere.</strong> Look for <strong>Install</strong> or <strong>Add to Home screen</strong> ' +
+        'in the browser menu. Some browsers only offer it after a second visit.' }),
+    ]);
   }
 
   function moreMenu(anchorEl) {
     const r = anchorEl.getBoundingClientRect();
     const st = S.settings();
-    menu(r.left - 130, r.bottom + 6, [
+    const pwa = BB.pwa;
+    const items = [
       { head: 'Edit' },
       { label: 'Undo', icon: 'undo', key: '⌘Z', disabled: !S.canUndo, run: () => { if (!S.undo()) U.toast('Nothing to undo'); } },
       { label: 'Redo', icon: 'redo', key: '⇧⌘Z', disabled: !S.canRedo, run: () => { if (!S.redo()) U.toast('Nothing to redo'); } },
       '-',
       { label: 'Tidy into generations', icon: 'layout', key: 'L', run: () => autoLayout(C.selected().length > 1 ? C.selected() : null) },
-      { label: 'Fit everything on screen', icon: 'fit', key: 'F', run: () => C.fit() },
-      { label: 'Back to the head of the line', icon: 'target', key: '0', run: () => C.home() },
+      { label: 'Fit everything on screen', icon: 'fit', key: 'F', run: () => C.fit(null, glide()) },
+      { label: 'Back to the head of the line', icon: 'target', key: '0', run: () => C.home(glide()) },
       { label: 'Switch theme', icon: 'sun', run: toggleTheme },
       '-',
       { head: 'Board' },
@@ -320,12 +510,33 @@
       '-',
       { head: 'View' },
       { label: 'Bubble size: ' + st.density, icon: 'grid', run: cycleDensity },
-      { label: 'Mouse wheel: ' + (S.prefs().wheel === 'pan' ? 'pans' : 'zooms'), icon: 'fit', run: cycleWheel },
+      /* A mouse wheel is not a thing you have on a phone. */
+      coarse.matches ? null
+        : { label: 'Mouse wheel: ' + (S.prefs().wheel === 'pan' ? 'pans' : 'zooms'), icon: 'fit', run: cycleWheel },
       { label: st.showGrid ? 'Hide the grid' : 'Show the grid', icon: 'grid', key: 'G', run: toggleGrid },
-      '-',
-      { label: 'Keyboard shortcuts', icon: 'help', key: '?', run: helpModal },
-      { label: 'About Bible Bubble', icon: 'book', run: aboutModal },
-    ]);
+    ];
+
+    /* The app itself. Every one of these is optional: with no service worker —
+       from a file:// copy, say — BB.pwa is simply not there. */
+    const install = [];
+    if (pwa && pwa.updateReady && pwa.updateReady()) {
+      install.push({ label: 'Update and reload', icon: 'redo', run: () => pwa.applyUpdate() });
+    }
+    if (pwa && pwa.canInstall && pwa.canInstall()) {
+      install.push({ label: 'Install app', icon: 'download', run: () => pwa.install().then(out => {
+        if (out === 'accepted') U.toast('Bible Bubble is on your home screen.');
+        else if (out === 'unavailable') installHelp();
+      }) });
+    } else if (pwa && pwa.isIOS && pwa.isIOS()) {
+      install.push({ label: 'Add to Home Screen…', icon: 'download', run: installHelp });
+    }
+    if (install.length) items.push('-', { head: 'App' }, ...install);
+
+    items.push('-',
+      { label: coarse.matches ? 'Gestures and shortcuts' : 'Keyboard shortcuts', icon: 'help', key: '?', run: helpModal },
+      { label: 'About Bible Bubble', icon: 'book', run: aboutModal });
+
+    menu(r.left - 130, r.bottom + 6, items, { name: 'more', anchor: anchorEl });
   }
 
   function boardMenu(anchorEl) {
@@ -334,12 +545,12 @@
     menu(r.left - 60, r.bottom + 6, [
       { head: 'This board' },
       { label: 'Rename…', run: renameBoard },
-      { label: 'Duplicate', icon: 'copy', run: () => { S.duplicateBoard(); refreshBoards(); U.toast('Board duplicated'); } },
+      { label: 'Duplicate', icon: 'copy', run: () => { S.duplicateBoard(); refreshBoards(); afterBoardChange(); U.toast('Board duplicated'); } },
       { label: 'Delete this board', icon: 'trash', danger: true, disabled: boards.length < 2, run: deleteBoard },
       '-',
       { label: 'New empty board', icon: 'plus', run: () => newBoard(false) },
       { label: 'New board from the starter lineage', icon: 'people', run: () => newBoard(true) },
-    ]);
+    ], { name: 'board', anchor: anchorEl });
   }
 
   const toggleGrid = () => {
@@ -368,28 +579,93 @@
   }
 
   /* ================= modals ================= */
+  /* One at a time, and each one hands focus back where it found it. */
+  const modalStack = [];
+
   function modal(title, bodyKids, footKids, opts) {
     const root = $('#modal-root');
     const o = opts || {};
-    const close = () => { root.hidden = true; root.replaceChildren(); };
-    const box = el('div.modal', { role: 'dialog', 'aria-modal': 'true' }, [
+    while (modalStack.length) modalStack[modalStack.length - 1].close();
+
+    const titleId = U.uid('mt');
+    const returnTo = document.activeElement;
+    const entry = {};
+    const close = () => {
+      const i = modalStack.indexOf(entry);
+      if (i < 0) return;
+      modalStack.splice(i, 1);
+      root.hidden = true;
+      root.replaceChildren();
+      root.onclick = null;
+      if (returnTo && returnTo.isConnected && typeof returnTo.focus === 'function') returnTo.focus();
+    };
+    entry.close = close;
+
+    const box = el('div.modal', {
+      role: 'dialog', 'aria-modal': 'true', 'aria-labelledby': titleId, tabindex: '-1',
+    }, [
       el('div.modal-head', {}, [
-        el('h3', { text: title }),
-        el('button.btn.icon.ghost', { type: 'button', title: 'Close', onclick: close }, [icon('close')]),
+        el('h3', { id: titleId, text: title }),
+        el('button.btn.icon.ghost', { type: 'button', title: 'Close', 'aria-label': 'Close', onclick: close }, [icon('close')]),
       ]),
       el('div.modal-body', {}, bodyKids),
       footKids ? el('div.modal-foot', {}, footKids) : null,
     ]);
     root.replaceChildren(box);
     root.hidden = false;
+    modalStack.push(entry);
     root.onclick = (e) => { if (e.target === root && !o.sticky) close(); };
+    guardHistory();
+    box.focus({ preventScroll: true });
     if (o.onOpen) requestAnimationFrame(() => o.onOpen(box, close));
     return close;
   }
 
+  const closeModals = () => { while (modalStack.length) modalStack[modalStack.length - 1].close(); };
+
+  /* ---------- focus ---------- */
+  const FOCUSABLE = 'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]),' +
+    ' textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
+  const focusablesIn = (root) => $$(FOCUSABLE, root)
+    .filter(n => !n.hidden && n.offsetParent !== null && !n.closest('[hidden]'));
+
+  /** Whatever is modal right now: a dialog, or a sheet with the backdrop up. */
+  function trapRoot() {
+    if (modalStack.length) return $('.modal', $('#modal-root'));
+    if (isPhone() && anyPanelOpen()) {
+      return $('#app').classList.contains('panel-details') ? $('#inspector') : $('#sidebar');
+    }
+    return null;
+  }
+
+  /** Keep Tab inside the thing that is covering the app. */
+  function initFocusTrap() {
+    document.addEventListener('keydown', (e) => {
+      if (e.key !== 'Tab') return;
+      const root = trapRoot();
+      if (!root) return;
+      const items = focusablesIn(root);
+      if (!items.length) { e.preventDefault(); root.focus({ preventScroll: true }); return; }
+      const first = items[0], last = items[items.length - 1];
+      const at = document.activeElement;
+      if (!root.contains(at)) { e.preventDefault(); (e.shiftKey ? last : first).focus(); return; }
+      if (e.shiftKey && at === first) { e.preventDefault(); last.focus(); }
+      else if (!e.shiftKey && at === last) { e.preventDefault(); first.focus(); }
+    }, true);
+  }
+
   function helpModal() {
     const groups = [
-      ['Canvas', [
+      coarse.matches ? ['Touch', [
+        ['Drag empty space', 'Pan around'],
+        ['Pinch', 'Zoom in and out'],
+        ['Tap a bubble', 'Select it — the card at the bottom carries its actions'],
+        ['Hold a bubble', 'Pick it up and move it'],
+        ['Hold empty canvas', 'Open the canvas menu'],
+        ['Double-tap empty space', 'Add a person there'],
+        ['Drag a handle on a selected bubble', 'Link to someone, or drop on empty space for a new person'],
+        ['Swipe down on the details sheet', 'Close it'],
+      ]] : ['Canvas', [
         ['Drag empty space', 'Pan around'],
         ['Wheel / pinch', 'Zoom in and out'],
         ['Shift + drag', 'Select a group'],
@@ -687,7 +963,6 @@
     ], [
       el('button.btn.danger', { type: 'button', text: 'Remove', onclick: () => {
         S.removeLink(id); close(); BB.inspector.refresh(true);
-        U.toast('Connection removed', { action: 'Undo', onAction: () => S.undo() });
       } }),
       el('span.foot-spacer'),
       el('button.btn', { type: 'button', text: 'Cancel', onclick: () => close() }),
@@ -750,6 +1025,7 @@
     setTimeout(() => C.home({ animate: false }), 30);
     BB.sidebar.render();
     BB.timeline.fit();
+    writeUrl('replace');
   }
 
   function layoutSeed() {
@@ -816,22 +1092,43 @@
       return 0;
     };
 
+    /* The results are a listbox the input drives from a distance, so a screen
+       reader hears the highlighted row without focus ever leaving the field. */
+    box.setAttribute('role', 'listbox');
+    box.setAttribute('aria-label', 'Search results');
+    input.setAttribute('role', 'combobox');
+    input.setAttribute('aria-expanded', 'false');
+    input.setAttribute('aria-controls', 'search-results');
+    input.setAttribute('aria-autocomplete', 'list');
+
+    const showBox = (open) => {
+      box.hidden = !open;
+      input.setAttribute('aria-expanded', String(!!open));
+      if (!open) input.removeAttribute('aria-activedescendant');
+    };
+
     const paint = () => {
       const f = U.fold(input.value.trim());
-      if (!f) { box.hidden = true; return; }
+      if (!f) { showBox(false); return; }
       results = S.people()
         .map(p => ({ p, s: score(p, f) }))
         .filter(r => r.s > 0)
         .sort((a, b) => b.s - a.s || (a.p.name || '').localeCompare(b.p.name || ''))
         .slice(0, 12);
       active = 0;
-      box.hidden = false;
-      if (!results.length) { box.replaceChildren(el('div.sr-empty', { text: 'Nobody matches “' + input.value.trim() + '”.' })); return; }
+      showBox(true);
+      if (!results.length) {
+        box.replaceChildren(el('div.sr-empty', { role: 'option', 'aria-disabled': 'true',
+          text: 'Nobody matches “' + input.value.trim() + '”.' }));
+        input.removeAttribute('aria-activedescendant');
+        return;
+      }
       box.replaceChildren(...results.map((r, i) => {
         const p = r.p;
         const st = S.settings();
         const sub = [p.role, p.era, U.formatSpan(p.birth, p.death, { mode: 'era', anchor: st.anchor, approx: p.approx })].filter(Boolean).join(' · ');
         return el('div.sr-item' + (i === 0 ? '.is-active' : ''), {
+          id: 'sr-opt-' + i, role: 'option', 'aria-selected': String(i === 0),
           onclick: () => go(p.id),
           onmouseenter: () => { active = i; paintActive(); },
         }, [
@@ -841,29 +1138,36 @@
           i === 0 ? el('span.sr-kbd', { text: '↵' }) : null,
         ]);
       }));
+      paintActive();
     };
-    const paintActive = () => $$('.sr-item', box).forEach((r, i) => r.classList.toggle('is-active', i === active));
+    const paintActive = () => {
+      $$('.sr-item', box).forEach((r, i) => {
+        r.classList.toggle('is-active', i === active);
+        r.setAttribute('aria-selected', String(i === active));
+      });
+      if (results.length) input.setAttribute('aria-activedescendant', 'sr-opt-' + active);
+    };
     const go = (id) => {
-      box.hidden = true;
+      showBox(false);
       input.blur();
-      if (isPhone()) { toggleSearch(false); closePanels(); }
-      C.select([id]);
-      if (currentView === 'canvas') C.focus(id, { zoom: 0.95 });
-      else BB.timeline.draw();
+      if (isPhone()) toggleSearch(false);
+      revealPerson(id);
     };
 
     input.addEventListener('input', U.debounce(paint, 90));
     input.addEventListener('focus', () => { if (input.value.trim()) paint(); });
     input.addEventListener('keydown', (e) => {
-      if (e.key === 'Escape') { input.value = ''; box.hidden = true; input.blur(); }
+      if (e.key === 'Escape') { input.value = ''; showBox(false); input.blur(); }
       else if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
         e.preventDefault();
         active = U.clamp(active + (e.key === 'ArrowDown' ? 1 : -1), 0, results.length - 1);
         paintActive();
+        const row = $$('.sr-item', box)[active];
+        if (row) row.scrollIntoView({ block: 'nearest' });
       } else if (e.key === 'Enter' && results[active]) { e.preventDefault(); go(results[active].p.id); }
     });
     document.addEventListener('click', (e) => {
-      if (!e.target.closest('.search-wrap')) box.hidden = true;
+      if (!e.target.closest('.search-wrap')) showBox(false);
     });
   }
 
@@ -874,10 +1178,11 @@
       const mod = e.metaKey || e.ctrlKey;
 
       if (e.key === 'Escape') {
-        if (!$('#modal-root').hidden) { $('#modal-root').hidden = true; $('#modal-root').replaceChildren(); return; }
+        if (modalStack.length) { closeModals(); return; }
+        if (!$('#context-menu').hidden) { closeMenu(); return; }
         if ($('#app').classList.contains('search-open')) { toggleSearch(false); return; }
         if (isPhone() && anyPanelOpen()) { closePanels(); return; }
-        closeMenu();
+        if (BB.peek && BB.peek.isOpen && BB.peek.isOpen()) { BB.peek.hide(); return; }
         if (typing) { e.target.blur(); return; }
         if (C.trace) { C.setTrace(null); return; }
         C.select([]);
@@ -908,7 +1213,7 @@
       else if (k === '/') { e.preventDefault(); $('#search-input').focus(); }
       else if (k === '?') { e.preventDefault(); helpModal(); }
       else if (k.toLowerCase() === 'n') { e.preventDefault(); addAtCentre(); }
-      else if (k.toLowerCase() === 'f') { e.preventDefault(); C.fit(C.selected().length > 1 ? C.selected() : null); }
+      else if (k.toLowerCase() === 'f') { e.preventDefault(); C.fit(C.selected().length > 1 ? C.selected() : null, glide()); }
       else if (k.toLowerCase() === 'l') { e.preventDefault(); autoLayout(C.selected().length > 1 ? C.selected() : null); }
       else if (k.toLowerCase() === 'g') { e.preventDefault(); toggleGrid(); }
       else if (k.toLowerCase() === 't') {
@@ -921,7 +1226,7 @@
       else if (k === '3') setView('timeline');
       else if (k === '+' || k === '=') C.zoomAt(1.25);
       else if (k === '-' || k === '_') C.zoomAt(1 / 1.25);
-      else if (k === '0') C.home();
+      else if (k === '0') C.home(glide());
       else if (k.startsWith('Arrow')) {
         const sel = C.selected();
         if (!sel.length) return;
@@ -960,20 +1265,73 @@
   const phoneQuery = window.matchMedia('(max-width: 700px)');
   const isPhone = () => phoneQuery.matches;
 
+  const panelEl = (name) => $(name === 'lineage' ? '#sidebar' : '#inspector');
+  let panelReturn = null;               // where focus was before a sheet took over
+  let backdropAt = 0;                   // when the backdrop last appeared
+
   /** Only one sheet at a time, and the backdrop follows whichever is open. */
   function setPanel(name, open) {
     const app = $('#app');
     const cls = 'panel-' + name;
     const other = name === 'lineage' ? 'panel-details' : 'panel-lineage';
+    const was = anyPanelOpen();
     if (open) { app.classList.add(cls); app.classList.remove(other); }
     else app.classList.remove(cls);
-    const any = app.classList.contains('panel-lineage') || app.classList.contains('panel-details');
+    const any = anyPanelOpen();
     $('#sheet-backdrop').hidden = !any;
+    if (any && !was) backdropAt = Date.now();
     paintMobileBar();
     if (open && name === 'details') BB.inspector.refresh(true);
+    if (!isPhone()) return;
+
+    syncSheets();
+    if (open) {
+      if (!was) panelReturn = document.activeElement;
+      guardHistory();
+      /* Sliding the canvas clear of the sheet is peek.js's — it measures the
+         sheet once it has finished coming up, which is the only honest moment. */
+      /* The sheet itself takes focus, not the first field in it — landing on a
+         text input would throw the keyboard up over the sheet you just opened. */
+      const host = panelEl(name);
+      if (host) { host.tabIndex = -1; host.focus({ preventScroll: true }); }
+    } else if (was && !any) {
+      if (panelReturn && panelReturn.isConnected && typeof panelReturn.focus === 'function') {
+        panelReturn.focus({ preventScroll: true });
+      }
+      panelReturn = null;
+    }
   }
   const closePanels = () => { setPanel('lineage', false); setPanel('details', false); };
   const anyPanelOpen = () => $('#app').classList.contains('panel-lineage') || $('#app').classList.contains('panel-details');
+
+  /**
+   * A closed sheet is off the side of the screen, not gone: without this it is
+   * still in the tab order and still read out, from behind whatever is on top.
+   */
+  function syncSheets() {
+    const app = $('#app');
+    const phone = isPhone();
+    [['lineage', '#sidebar'], ['details', '#inspector']].forEach(([name, sel]) => {
+      const node = $(sel);
+      if (!node) return;
+      const shut = phone && !app.classList.contains('panel-' + name);
+      if (shut) {
+        if (node.contains(document.activeElement)) document.activeElement.blur();
+        node.inert = true;
+        node.setAttribute('aria-hidden', 'true');
+      } else {
+        node.inert = false;
+        node.removeAttribute('aria-hidden');
+      }
+    });
+  }
+
+  /** A sheet left showing somebody who has just been deleted is only in the way. */
+  function closeStaleDetails() {
+    if (!isPhone() || !$('#app').classList.contains('panel-details')) return;
+    const sel = C.selected();
+    if (sel.length && sel.every(id => !S.person(id))) setPanel('details', false);
+  }
 
   function paintMobileBar() {
     const app = $('#app');
@@ -984,7 +1342,15 @@
       web: currentView === 'web',
       timeline: currentView === 'timeline',
     };
-    $$('.mb-item').forEach(b => b.classList.toggle('is-active', !!state[b.dataset.mb]));
+    $$('.mb-item').forEach(b => {
+      const on = !!state[b.dataset.mb];
+      b.classList.toggle('is-active', on);
+      if (b.dataset.mb === 'lineage' || b.dataset.mb === 'details') {
+        b.setAttribute('aria-expanded', String(on));
+        b.setAttribute('aria-controls', b.dataset.mb === 'lineage' ? 'sidebar' : 'inspector');
+      } else if (on) b.setAttribute('aria-current', 'page');
+      else b.removeAttribute('aria-current');
+    });
     const label = $('#mb-details-label');
     if (label) {
       const sel = C.selected();
@@ -1007,7 +1373,19 @@
       if (which === 'canvas' || which === 'web' || which === 'timeline') { closePanels(); setView(which); }
       else setPanel(which, !$('#app').classList.contains('panel-' + which));
     }));
-    $('#sheet-backdrop').addEventListener('click', closePanels);
+    /**
+     * A tap on the canvas comes back a moment later as a click, and by then the
+     * backdrop is under the finger — which is how double-tapping to add someone
+     * used to shut the very sheet it had just opened to name them in.
+     */
+    const backdrop = $('#sheet-backdrop');
+    /* Cancelling the default on mousedown keeps the focus where it is, so that
+       stray click cannot take the keyboard away from the field either. */
+    backdrop.addEventListener('mousedown', (e) => e.preventDefault());
+    backdrop.addEventListener('click', () => {
+      if (Date.now() - backdropAt < 400) return;
+      closePanels();
+    });
 
     // a swipe down on the details sheet header closes it
     const insp = $('#inspector');
@@ -1020,10 +1398,18 @@
       if (e.touches[0].clientY - sy > 70) { sy = null; setPanel('details', false); }
     }, { passive: true });
 
+    /* "Double-click" is advice nobody can follow with a finger. */
+    const emptyText = $('#empty-state p');
+    const emptyDesktop = emptyText ? emptyText.textContent : '';
+    const emptyPhone = 'Double-tap anywhere to make your first bubble — or load the ' +
+      'Genesis → Gospel lineage to start from Adam.';
+
     const sync = () => {
       const phone = isPhone();
       $('#app').classList.toggle('is-phone', phone);
       if (!phone) { closePanels(); toggleSearch(false); }
+      if (emptyText) emptyText.textContent = phone ? emptyPhone : emptyDesktop;
+      syncSheets();
       paintMobileBar();
     };
     phoneQuery.addEventListener ? phoneQuery.addEventListener('change', sync) : phoneQuery.addListener(sync);
@@ -1031,12 +1417,182 @@
     sync();
   }
 
+  /* ================= offering the undo ================= */
+  /**
+   * On a phone there is no ⌘Z and the toolbar has no room for an undo button, so
+   * the offer has to come to the change rather than the other way round. One
+   * offer at a time: a new one replaces the last, because an undo six edits ago
+   * is not the undo anybody means.
+   */
+  let dropOffer = null;
+  let quietDepth = 0;
+  let justDropped = null;         // ids from a finger drag, waiting for their move to land
+  let known = { people: new Map(), links: new Map() };
+
+  /** Run a compound edit — a delete and an add — without offering an undo halfway. */
+  function quietly(fn) {
+    quietDepth++;
+    try { return fn(); } finally { quietDepth--; }
+  }
+
+  function offerUndo(msg) {
+    if (dropOffer) dropOffer();
+    dropOffer = S.canUndo
+      ? U.toast(msg, { ms: 5200, action: 'Undo', onAction: () => { dropOffer = null; S.undo(); } })
+      : U.toast(msg);
+  }
+
+  const snapshotDoc = () => {
+    known = {
+      people: new Map(S.people().map(p => [p.id, p.name])),
+      links: new Map(S.links().map(l => [l.id, l.type])),
+    };
+  };
+
+  /** What the snapshot held that the document no longer does. */
+  function lostFrom(map, live) {
+    const out = [];
+    map.forEach((val, id) => { if (!live[id]) out.push(val); });
+    return out;
+  }
+
+  function watchEdits() {
+    snapshotDoc();
+    S.on('change', (e) => {
+      const reasons = String((e && e.reason) || '').split('+');
+      const has = (r) => reasons.indexOf(r) >= 0;
+      /* Undo, redo, loading and board switches all move the ground under the
+         snapshot without anybody losing anything. */
+      if (has('history') || has('load') || has('board') || has('replace')) { snapshotDoc(); return; }
+      if (quietDepth > 0) { snapshotDoc(); return; }
+
+      if (has('people')) {
+        const gone = lostFrom(known.people, S.doc.people);
+        if (gone.length === 1) offerUndo('Deleted ' + (gone[0] || 'that person'));
+        else if (gone.length) offerUndo('Deleted ' + U.plural(gone.length, 'person', 'people'));
+      } else if (has('links')) {
+        const gone = lostFrom(known.links, S.doc.links);
+        if (gone.length === 1) offerUndo(gone[0] === 'other' ? 'Connection removed' : 'Link removed');
+        else if (gone.length) offerUndo(U.plural(gone.length, 'link') + ' removed');
+      } else if (has('positions') && justDropped) {
+        /* A picked-up-and-dropped bubble is the one move that is easy to make by
+           accident and hard to spot afterwards — and it happens on the screen
+           with no ⌘Z. A tidy, a nudge or a mouse drag speaks for itself. */
+        const ids = justDropped;
+        justDropped = null;
+        offerUndo(movedLabel(ids));
+      }
+      snapshotDoc();
+    });
+
+    /* 'drop' only fires for a finger that lifted a bubble, and it arrives just
+       before the move reaches the store. */
+    C.on('drop', ({ ids, moved }) => { if (moved) justDropped = ids; });
+  }
+
+  function movedLabel(ids) {
+    if (ids.length === 1) {
+      const p = S.person(ids[0]);
+      return 'Moved ' + ((p && p.name) || 'that bubble');
+    }
+    return 'Moved ' + U.plural(ids.length || 1, 'bubble');
+  }
+
+  /* ================= reach ================= */
+  /**
+   * The phone toolbar drops undo for want of room, which leaves a mis-drag with
+   * nowhere to go but the ☰ menu. This button only exists once there is
+   * something to undo, so it costs the board name nothing until it is needed.
+   */
+  function initQuickUndo() {
+    const actions = $('.topbar .actions');
+    const more = $('#more-btn');
+    if (!actions || !more) return;
+    actions.insertBefore(el('button.btn.icon.ghost.undo-quick', {
+      type: 'button', 'data-act': 'undo', title: 'Undo', 'aria-label': 'Undo',
+    }, [icon('undo')]), more);
+  }
+  const paintUndoState = () => $('#app').classList.toggle('can-undo', S.canUndo);
+
+  /** Subscribe once, whenever pwa.js turns up — it boots after this file does. */
+  let pwaWatched = false;
+  function watchPwa() {
+    if (pwaWatched || !BB.pwa || !BB.pwa.onChange) return;
+    pwaWatched = true;
+    BB.pwa.onChange(() => { if (openMenu === 'more' && menuAnchor) moreMenu(menuAnchor); });
+  }
+
+  /**
+   * The zoom control, the trace bar and the empty-state buttons sit inside the
+   * viewport, and the canvas takes pointer capture on anything that lands on the
+   * background — which retargets the mouseup and leaves the click on the
+   * viewport, so a tap on any of them did nothing at all. Stopping the bubble at
+   * the chrome keeps the canvas out of it; the minimap still hears its own
+   * pointerdown first, because this fires on the way back up.
+   */
+  function shieldChrome() {
+    $$('.canvas-hud, .trace-bar, .empty-actions').forEach(node => {
+      node.addEventListener('pointerdown', (e) => e.stopPropagation());
+    });
+  }
+
+  /* ================= accessibility ================= */
+  function initA11y() {
+    const panelFor = { canvas: 'viewport', web: 'web', timeline: 'timeline' };
+    const tabs = $$('.viewtabs .tab');
+    tabs.forEach(t => {
+      const id = panelFor[t.dataset.view];
+      const panel = id && document.getElementById(id);
+      if (!panel) return;
+      t.setAttribute('aria-controls', id);
+      panel.setAttribute('role', 'tabpanel');
+      panel.setAttribute('aria-label', t.textContent.trim() + ' view');
+    });
+    /* Roving focus: one stop for the whole tablist, arrows to move inside it. */
+    const list = $('.viewtabs');
+    if (list) {
+      list.setAttribute('aria-label', 'View');
+      list.addEventListener('keydown', (e) => {
+        const at = tabs.indexOf(document.activeElement);
+        if (at < 0) return;
+        let next = -1;
+        if (e.key === 'ArrowRight' || e.key === 'ArrowDown') next = (at + 1) % tabs.length;
+        else if (e.key === 'ArrowLeft' || e.key === 'ArrowUp') next = (at - 1 + tabs.length) % tabs.length;
+        else if (e.key === 'Home') next = 0;
+        else if (e.key === 'End') next = tabs.length - 1;
+        if (next < 0) return;
+        e.preventDefault();
+        tabs[next].focus();
+        setView(tabs[next].dataset.view);
+      });
+    }
+
+    const label = (sel, text) => { const n = $(sel); if (n) n.setAttribute('aria-label', text); };
+    label('#sidebar', 'Lineage and people');
+    label('#inspector', 'Details');
+    label('#trace-bar', 'Traced line');
+
+    /* Save state and the running counts are worth hearing, quietly. */
+    const status = $('#statusbar');
+    if (status) { status.setAttribute('role', 'status'); status.setAttribute('aria-live', 'polite'); }
+    const toasts = $('#toasts');
+    if (toasts) {
+      toasts.setAttribute('role', 'status');
+      toasts.setAttribute('aria-live', 'polite');
+      toasts.setAttribute('aria-atomic', 'false');
+    }
+  }
+
   /* ================= boot ================= */
   function init() {
     S = BB.store; L = BB.lineage; C = BB.canvas;
     initTheme();
 
+    const route = readRoute();
     const loaded = S.load();
+    /* Board ids are this browser's own, so a link only opens a board that is
+       already here; anything else quietly stays on whichever board was last up. */
+    if (route.board && route.board !== S.doc.id) S.openBoard(route.board);
     BB.canvas.init();
     BB.io.init();
     BB.inspector.init();
@@ -1047,9 +1603,16 @@
     applyDensity();
     $('#viewport').classList.toggle('show-grid', S.settings().showGrid);
     refreshBoards();
+    initA11y();
+    shieldChrome();
     initSearch();
     initKeys();
+    initMenuKeys();
+    initFocusTrap();
+    initQuickUndo();
     initMobile();
+    initRouter();
+    watchEdits();
 
     /* toolbar */
     document.addEventListener('click', (e) => {
@@ -1059,9 +1622,9 @@
       const run = {
         'add-person': addAtCentre,
         'layout': () => autoLayout(C.selected().length > 1 ? C.selected() : null),
-        'fit': () => C.fit(),
+        'fit': () => C.fit(null, glide()),
         'theme': toggleTheme,
-        'more': () => moreMenu(btn),
+        'more': () => { if (openMenu === 'more') closeMenu(); else moreMenu(btn); },
         'undo': () => { if (!S.undo()) U.toast('Nothing to undo'); },
         'redo': () => { if (!S.redo()) U.toast('Nothing to redo'); },
         'zoom-in': () => C.zoomAt(1.25),
@@ -1129,6 +1692,7 @@
     C.on('select', () => {
       if (currentView === 'timeline') BB.timeline.draw();
       paintMobileBar();
+      writeUrlSoon();
     });
 
     /* status bar */
@@ -1139,6 +1703,8 @@
         `${U.plural(st.people, 'person', 'people')} · ${U.plural(st.links, 'link')}${bonds} · ${st.generations} generations`;
     };
     S.on('change', paintStatus);
+    S.on('change', paintUndoState);
+    S.on('change', closeStaleDetails);
     S.on('dirty', (d) => {
       const n = $('#status-save');
       n.textContent = d ? 'Saving…' : 'Saved';
@@ -1156,17 +1722,25 @@
     document.addEventListener('visibilitychange', () => { if (document.hidden) S.flush(); });
 
     const savedView = S.prefs().view;
-    setView(savedView === 'timeline' || savedView === 'web' ? savedView : 'canvas');
+    setView(route.view || (VIEWS.includes(savedView) ? savedView : 'canvas'), { history: 'none' });
+    paintUndoState();
+    watchPwa();
+    setTimeout(watchPwa, 0);          // pwa.js boots a moment after this file does
 
     if (loaded.fresh) {
       S.createBoard('My lineage');
       refreshBoards();
       welcome();
+    } else if (route.person && S.person(route.person)) {
+      /* Deep link: wait for the first render, or there is nothing to centre on. */
+      requestAnimationFrame(() => { revealPerson(route.person); writeUrl('replace'); });
+      return;
     } else if (S.count()) {
       const v = S.doc.view;
       const untouched = !v || (!v.x && !v.y && v.k === 1);
       if (untouched) setTimeout(() => C.home({ animate: false }), 60);
     }
+    writeUrl('replace');
   }
 
   BB.app = {
