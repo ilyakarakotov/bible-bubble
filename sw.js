@@ -94,7 +94,9 @@ async function assetFirst(request) {
   }
   try {
     const fresh = await fetch(request);
-    if (fresh && fresh.ok && fresh.type === 'basic') cache.put(request, fresh.clone()).catch(() => {});
+    if (fresh && fresh.ok && fresh.type === 'basic') {
+      cache.put(request, fresh.clone()).catch(() => {});
+    }
     return fresh;
   } catch (_) {
     return Response.error();

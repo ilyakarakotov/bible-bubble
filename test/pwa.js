@@ -53,11 +53,11 @@ function findChrome() {
   return undefined;
 }
 
-/** Width and height straight out of a PNG's IHDR, so a stub file cannot pass. */
+/** Width, height and colour type straight out of a PNG's IHDR — a stub cannot pass. */
 function pngSize(file) {
   const b = fs.readFileSync(file);
-  if (b.length < 24 || b.toString('binary', 1, 4) !== 'PNG') return null;
-  return { w: b.readUInt32BE(16), h: b.readUInt32BE(20) };
+  if (b.length < 26 || b.toString('binary', 1, 4) !== 'PNG') return null;
+  return { w: b.readUInt32BE(16), h: b.readUInt32BE(20), alpha: b[25] === 4 || b[25] === 6 };
 }
 
 /** Everything index.html pulls in, as site-relative paths. */
@@ -145,6 +145,9 @@ function shellAssets() {
     if (!fs.existsSync(file)) throw new Error('no icons/apple-touch-icon.png');
     const size = pngSize(file);
     if (!size || size.w !== 180 || size.h !== 180) throw new Error('it is ' + (size ? size.w + 'x' + size.h : 'not a PNG'));
+    // iOS does not honour transparency here — it composites black behind it, and a
+    // rounded tile with alpha corners comes out framed in black on the home screen.
+    if (size.alpha) throw new Error('it has an alpha channel, which iOS fills with black');
   });
 
   console.log('\nthe service worker');

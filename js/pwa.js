@@ -28,9 +28,10 @@
 
   /* ================= state ================= */
 
+  const modeQuery = window.matchMedia ? matchMedia('(display-mode: standalone)') : null;
+
   function isStandalone() {
-    return (window.matchMedia && matchMedia('(display-mode: standalone)').matches) ||
-      navigator.standalone === true;
+    return (modeQuery ? modeQuery.matches : false) || navigator.standalone === true;
   }
 
   function isIOS() {
@@ -180,7 +181,9 @@
     try { localStorage.setItem(NUDGE_KEY, String(Date.now())); } catch (_) {}
   }
 
-  const isPhone = () => (BB.app && BB.app.isPhone ? BB.app.isPhone() : matchMedia('(max-width: 700px)').matches);
+  const isPhone = () => (BB.app && BB.app.isPhone
+    ? BB.app.isPhone()
+    : matchMedia('(max-width: 700px)').matches);
 
   function closeNudge() {
     if (!nudge) return;
@@ -190,10 +193,6 @@
     setTimeout(() => node.remove(), 220);
   }
 
-  /**
-   * Asking to install before anyone has anything worth keeping is noise, so this
-   * waits for a phone with people already on the board, and only ever fires once.
-   */
   let nudgePending = false;
 
   function nudgeWanted() {
@@ -203,6 +202,10 @@
     return !!(BB.store && BB.store.count() > 0);
   }
 
+  /**
+   * Asking someone to install before they have anything worth keeping is noise,
+   * so this holds off until a phone has people on the board, and fires once.
+   */
   function considerNudge() {
     if (seen()) { stopWatching(); return; }
     if (nudgePending || !nudgeWanted()) return;
@@ -255,6 +258,14 @@
       .observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] });
 
     registerWorker();
+
+    /* Launching from the home screen flips isStandalone() out from under anyone
+       who asked to be told. */
+    if (modeQuery) {
+      const moved = () => { announce(); considerNudge(); };
+      if (modeQuery.addEventListener) modeQuery.addEventListener('change', moved);
+      else if (modeQuery.addListener) modeQuery.addListener(moved);
+    }
 
     /* The board is only worth pinning once it holds someone, so look again after
        the first edits rather than only at load. */
