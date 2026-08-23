@@ -35,6 +35,22 @@ Hosting it yourself takes one dropdown and no build step: **Settings → Pages �
 Source: Deploy from a branch → `main` → `/ (root)` → Save**. GitHub then serves
 the files as they are and re-publishes on every push.
 
+### Install it
+
+It is a progressive web app, so it installs onto a phone or a desktop like any
+other app and then runs with no network at all.
+
+- **Android, Chrome, Edge** — take the install prompt, or **☰ → Install app**.
+- **iPhone and iPad** — Safari's **Share → Add to Home Screen**. iOS has no
+  install prompt, so the app shows you the way there the first time.
+- **Desktop** — the install icon in the address bar, or ☰ → Install app.
+
+Installed, it opens full-screen with its own icon, and long-pressing that icon
+jumps straight to the **Web** or the **Timeline**. A service worker keeps every
+file on the device, so it starts on a plane or with the wifi off — your boards
+were never on a server to begin with. When a new version is published the app
+notices and offers a reload rather than changing under you mid-edit.
+
 On first run it offers to start you from **Adam** with 109 people already filled
 in — the line down to Jesus, with ages, dates, scripture references and
 highlights, plus 40 recorded connections that are not lineage — or to hand you an
@@ -109,13 +125,25 @@ died in the very year of the Flood.
 
 ### On a phone
 The whole thing works one-handed. A bottom bar carries the five places you go —
-**Lineage**, **Canvas**, **Web**, **Timeline**, and **Details** (which shows the
-selected person's name, so you always know what you have got hold of).
+**Lineage**, **Canvas**, **Web**, **Timeline** and **Details**.
 
-Tap a bubble to select it; its link handles grow to finger size. Press and hold
-for the same menu a right-click gives on a desktop. Pinch to zoom, drag to pan,
-double-tap empty canvas to add someone. Details opens as a sheet over the
-canvas — flick it down to dismiss — so the bubble you are editing stays in view.
+**Tap anyone and a card slides up saying who they are** — name, role, when they
+lived, which generation, how many links they carry — with **Details**, **Trace**,
+**Link** and a menu on it. No hunting for the answer somewhere else on screen.
+
+**Dragging pans, holding picks up.** A finger that lands on somebody still drags
+the board, because that is what dragging a map means and on a phone your finger
+lands on somebody constantly. Hold still for a moment and you pick that person up
+instead, with a small buzz, exactly as a hold works everywhere else on a phone.
+A flick glides to a stop rather than dying under your finger.
+
+**Linking is two taps.** Dragging a hairline out of a handle in a world scaled to
+a third was never really possible with a fingertip. Tap **Link**, go and find the
+other person — drag around, pinch, take your time — tap them, and say how they are
+related. Handles still work if you prefer them.
+
+Details opens as a sheet over the canvas, and the canvas shifts so the person it
+is about stays visible above it. Flick the sheet down to dismiss it.
 
 <p align="center">
   <img src="docs/mobile-canvas.png" alt="The canvas on a phone" width="23%">
@@ -190,8 +218,13 @@ it is a starting point, not a reference work.
 
 ```
 index.html          markup and the icon sprite
+manifest.webmanifest  name, icons and shortcuts for the installed app
+sw.js               the service worker: precache the shell, serve it offline
+icons/              the app icon, maskable and Apple variants
 css/app.css         the main stylesheet, themed with custom properties
 css/web.css         styles for the web view
+css/mobile.css      phone-only canvas styling, loaded last
+css/pwa.css         the install prompt
 js/util.js          helpers, the palette, year parsing and formatting
 js/store.js         document model, validation, undo history, localStorage
 js/seed.js          the Adam-to-Jesus starter board
@@ -203,8 +236,11 @@ js/web.js           the force-directed web of connections
 js/sidebar.js       lineage outline and people list
 js/io.js            JSON / Markdown / CSV
 js/app.js           toolbar, menus, search, shortcuts
+js/peek.js          the phone card, and two-tap linking
+js/pwa.js           install, offline and update
 test/smoke.js       end-to-end browser test
 test/touch.js       the same, on a phone-sized screen with touch
+test/pwa.js         installable, precached and offline
 ```
 
 Plain ES5-compatible scripts on a `BB` namespace — no bundler, no framework, no
@@ -221,6 +257,7 @@ console error:
 npm install --no-save playwright
 node test/smoke.js          # HEADED=1 to watch it
 node test/touch.js          # the same app at 390x844, with a finger
+node test/pwa.js            # installable, precached, and offline
 ```
 
 `smoke.js` covers loading the starter board, search, tracing, the timeline and
@@ -232,9 +269,19 @@ same pair can hold two kinds of connection but not two of a kind, that the web
 actually paints, that the most-connected list agrees with the graph, and that
 the hop count between two people is real.
 
-`touch.js` drives the phone layout: the bottom bar, the sheets, finger-sized
-handles, long-press, pinch, double-tap, and every view without the page ever
-scrolling sideways.
+`touch.js` drives the phone layout with a real finger: the card that names who
+you tapped, opening the details without the sheet burying its own subject, the
+menu on the card, linking in two taps, a hold that picks a person up where a drag
+pans past them, a hold on empty canvas that still opens its menu, a flick that
+keeps gliding, pinch, double-tap, the drawers, and every view without the page
+ever scrolling sideways.
+
+`pwa.js` checks the things a broken install fails at quietly: that the manifest
+names icons that exist, at the sizes it claims, with no absolute paths that would
+send the installed app to the domain root; that the worker's precache list still
+matches what `index.html` actually loads; and that the whole app comes back with
+the network cut — run with Chromium's own HTTP cache disabled, so a stale disk
+copy cannot stand in for the worker.
 
 ---
 
